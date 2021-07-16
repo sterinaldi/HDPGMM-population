@@ -126,7 +126,6 @@ class CGSampler:
             self.a_ev, self.V_ev = hyperpriors_ev
         else:
             self.a_ev, self.V_ev = [1,1/4.]
-        self.sigma_max = sigma_max
         # miscellanea
         self.output_folder = output_folder
         self.icn = initial_cluster_number
