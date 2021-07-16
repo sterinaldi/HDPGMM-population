@@ -148,7 +148,8 @@ cpdef  tuple ang2eq(double theta, double phi):
     cdef double dec = np.pi/2. - theta
     return ra, dec
 
-cpdef  tuple cartesian_to_spherical(np.ndarray[np.float64_t, ndim=1] vector):
+cpdef list cartesian_to_spherical(np.ndarray[np.float64_t, ndim=1] vector):
+
     """Convert the Cartesian vector [x, y, z] to spherical coordinates [r, theta, phi].
 
     The parameter r is the radial distance, theta is the polar angle, and phi is the azimuth.
@@ -163,12 +164,10 @@ cpdef  tuple cartesian_to_spherical(np.ndarray[np.float64_t, ndim=1] vector):
     # The radial distance.
     cdef unsigned int i
     cdef double r
-    for i in range(3):
-        r += vector[i]*vector[i]
+    r = vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2]
     r = sqrt(r)
-    # Unit vector.
+    # Unit vector
     cdef np.ndarray[np.float64_t, ndim=1] unit = vector / r
-
     # The polar angle.
     cdef double theta = acos(unit[2])
 
@@ -176,7 +175,8 @@ cpdef  tuple cartesian_to_spherical(np.ndarray[np.float64_t, ndim=1] vector):
     cdef double phi = atan2(unit[1], unit[0])
 
     # Return the spherical coordinate vector.
-    return r, theta, phi
+    cdef list coord = [r,theta,phi]
+    return coord
 
 
 cpdef  np.ndarray[np.float64_t, ndim=1] spherical_to_cartesian(np.ndarray[np.float64_t, ndim=1] spherical_vect):
@@ -209,7 +209,11 @@ cpdef  np.ndarray[np.float64_t, ndim=1] cartesian_to_celestial(np.ndarray[np.flo
     """Convert the Cartesian vector [x, y, z] to the celestial coordinate vector [r, dec, ra]."""
     spherical_vect = cartesian_to_spherical(cartesian_vect)
     spherical_vect[1]=np.pi/2. - spherical_vect[1]
-    return spherical_vect
+    cdef np.ndarray[np.float64_t, ndim=1] coord = np.zeros(3)
+    coord[0] = spherical_vect[0]
+    coord[1] = spherical_vect[1]
+    coord[2] = spherical_vect[2]
+    return coord
 
 cpdef  double Jacobian(np.ndarray[np.float64_t, ndim=1] cartesian_vect):
     d = sqrt(cartesian_vect.dot(cartesian_vect))

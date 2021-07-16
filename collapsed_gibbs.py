@@ -20,6 +20,7 @@ from scipy.spatial.distance import jensenshannon as js
 from scipy.special import logsumexp, betaln, gammaln, erfinv
 from scipy.interpolate import RegularGridInterpolator
 from scipy.integrate import nquad
+from scipy.linalg import det
 
 from sampler_component_pars import sample_point, MH_single_event
 import itertools
@@ -32,7 +33,35 @@ from ray.util.multiprocessing import Pool
 
 from numba import jit
 
-from utils import integrand, compute_norm_const, log_norm, scalar_log_norm
+from utils import integrand, compute_norm_const, log_norm, scalar_log_norm, make_sym_matrix, cartesian_to_celestial
+
+import cpnest.model
+
+class Integrator(cpnest.model.Model):
+    
+    def __init__(self, bounds, events, logN_cnst, dim):
+        
+        super(Integrator, self).__init__()
+        self.events    = events
+        self.logN_cnst = logN_cnst
+        self.dim       = dim
+        self.names     = ['m{0}'.format(i+1) for i in range(self.dim)] + ['s{0}'.format(j) for j in range(int(self.dim*(self.dim+1)/2.))]
+        self.bounds    = bounds
+    
+    def log_prior(self, x):
+        
+        logP = super(Integrator, self).log_prior(x)
+        if np.isfinite(logP):
+            s_vals = np.array([x['s{0}'.format(j)] for j in range(int(self.dim*(self.dim+1)/2.))])
+            if det(make_sym_matrix(self.dim, s_vals)) == 0:
+                logP = -np.inf
+            else:
+                logP = 0.
+        return logP
+    
+    def log_likelihood(self, x):
+        vals = np.array([x[name] for name in self.names])
+        return integrand(vals, self.events, self.logN_cnst, self.dim)
 
 """
 Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
@@ -324,7 +353,7 @@ def my_student_t(df, t, mu, sigma, dim, s2max = np.inf):
 
     return float(A - B - C - D + E)
     
-@ray.remote
+#@ray.remote
 class SE_Sampler:
     '''
     Class to reconstruct a posterior density function given samples.
@@ -379,7 +408,8 @@ class SE_Sampler:
                        verbose = True,
                        initial_cluster_number = 5.,
                        transformed = False,
-                       var_names = None
+                       var_names = None,
+                       vol_rec = False
                        ):
         # New seed for each subprocess
         random.RandomState(seed = os.getpid())
@@ -441,6 +471,7 @@ class SE_Sampler:
         self.verbose = verbose
         self.alpha_samples = []
         self.var_names = var_names
+        self.vol_rec = vol_rec
         
     def transform(self, samples):
         '''
@@ -741,7 +772,10 @@ class SE_Sampler:
         self.median = np.array(p[50])
         self.points = points
         
-        samples_to_plot = MH_single_event(RegularGridInterpolator(points, p[50]), upper_bound, lower_bound, len(self.mass_samples))
+        samples_to_plot = np.array(MH_single_event(RegularGridInterpolator(points, p[50]), upper_bound, lower_bound, len(self.mass_samples)))
+        if self.vol_rec:
+            self.initial_samples = np.array([cartesian_to_celestial(np.array([x,y,z])) for x,y,z in zip(self.initial_samples[:,0], self.initial_samples[:,1], self.initial_samples[:,2])])
+            samples_to_plot = np.array([cartesian_to_celestial(np.array([x,y,z])) for x,y,z in zip(samples_to_plot[:,0], samples_to_plot[:,1], samples_to_plot[:,2])])
         c = corner(self.initial_samples, color = 'orange', labels = self.var_names, hist_kwargs={'density':True})
         c = corner(samples_to_plot, fig = c, color = 'blue', labels = self.var_names, hist_kwargs={'density':True})
         c.savefig(self.output_pltevents + '/{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
@@ -948,8 +982,12 @@ class MF_Sampler():
     def log_numerical_predictive(self, events, t_min, t_max, sigma_min, sigma_max):
         logN_cnst = compute_norm_const(np.zeros(self.dim), np.identity(self.dim), events) + logsumexp([np.log(tmax - tmin) for tmin, tmax in zip(t_min, t_max)]) + np.log(sigma_max - sigma_min)*self.dim*(self.dim + 1)/2.
         bounds = [[tmin, tmax] for tmin, tmax in zip(t_min, t_max)] + [[sigma_min, sigma_max] for _ in range(int(self.dim*(self.dim + 1)/2.))]
-        I, dI, d = nquad(integrand, bounds, args = [events, logN_cnst, self.dim])
-        return np.log(I) + logN_cnst
+        integrator = Integrator(bounds, events, logN_cnst, self.dim)
+        work = cpnest.CPNest(integrator, verbose = 1, nlive = 1000, maxmcmc = 1000, nthreads = 1, output = self.output_folder)
+        work.run()
+        return work.NS.logZ
+        #I, dI, d = nquad(integrand, bounds, args = [events, logN_cnst, self.dim])
+        #return np.log(I) + logN_cnst
     
     def cluster_assignment_distribution(self, data_id, state):
         """
