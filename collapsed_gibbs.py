@@ -122,7 +122,7 @@ class CGSampler:
         self.alpha0 = alpha0
         self.gamma0 = gamma0
         # student-t
-        if hyperpars_ev is not None:
+        if hyperpriors_ev is not None:
             self.a_ev, self.V_ev = hyperpriors_ev
         else:
             self.a_ev, self.V_ev = [1,1/4.]
