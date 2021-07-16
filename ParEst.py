@@ -111,14 +111,14 @@ class DirichletProcess(cpnest.model.Model):
         
         pars = [x[lab] for lab in self.labels]
         base = np.array([self.model(mi, *pars)*dm for mi in m])
-        base = base/np.sum(base)
+        base = base/(np.sum(base))
         c_par = 10**x['a']
         a = c_par*base
 #        p = np.array([probs[randint(self.n_samps), i] for i in range(N)])
 #        p = p - logsumexp(p)
         #implemented as in scipy.stats.dirichlet.logpdf() w/o checks
         lnB = np.sum([numba_gammaln(ai) for ai in a]) - numba_gammaln(np.sum(a))
-        logL = - lnB + np.sum([my_dot(a-1, p) for p in probs])/self.n_samps#np.sum((xlogy(a-1, p.T)).T, 0)
+        logL = - self.n_samps*lnB + np.sum([my_dot(a-1, p) for p in probs])# - numba_gammaln(self.n_samps+1)/self.n_samps#np.sum((xlogy(a-1, p.T)).T, 0)
 #        logL = np.sum([ai*p + (c_par - ai)*log_sub(0,p) + gammaln(c_par) - gammaln(ai) - gammaln(c_par - ai) for ai, p in zip(a, probs.T)])
 #        logL = np.sum([beta(ai, c_par - ai).logpdf(p) for ai, p in zip(a, probs.T)])#- lnB + my_dot(a-1, p)#np.sum((xlogy(a-1, p.T)).T, 0)
         return logL
