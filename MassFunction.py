@@ -60,16 +60,22 @@ def plot_samples(samples, m_min, m_max, output, injected_density = None, filtere
             norm = np.sum([injected_density(a)*(app[1]-app[0]) for a in app])
             density = np.array([injected_density(a)/norm for a in app])
             ax.plot(app, density, color = 'm', marker = '', linewidth = 0.7, label = '$Simulated - Astro$')
-            ent = js(p[50]/norm, density)
-            print('Jensen-Shannon distance: {0} nats'.format(ent))
-            np.savetxt(output + '/joint_relative_entropy.txt', np.array([ent]))
+            ent = [js(np.exp(s(app)), density) for s in samples]
+            JSD = {}
+            for perc in percentiles:
+                JSD[perc] = np.percentile(ent, perc, axis = 0)
+            print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]))
+            np.savetxt(output + '/joint_relative_entropy.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
         if filtered_density is not None:
             norm = np.sum([filtered_density(a)*(app[1]-app[0]) for a in app])
             f_density = np.array([filtered_density(a)/norm for a in app])
             ax.plot(app, f_density, color = 'k', marker = '', linewidth = 0.7, label = '$Simulated - Obs$')
-            ent = js(p[50]/norm, f_density)
-            print('Jensen-Shannon distance: {0} nats (filtered)'.format(ent))
-            np.savetxt(output + '/filtered_joint_relative_entropy.txt', np.array([ent]))
+            ent = np.array([js(np.exp(s(app)), f_density) for s in samples])
+            JSD = {}
+            for perc in percentiles:
+                JSD[perc] = np.percentile(ent, perc)
+            print('Jensen-Shannon distance: {0}+{1}-{2} nats (filtered)'.format(JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]))
+            np.savetxt(output + '/filtered_joint_relative_entropy.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
         
         plt.legend(loc = 0)
         ax.set_xlabel('$M\ [M_\\odot]$')
