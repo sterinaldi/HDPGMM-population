@@ -35,22 +35,23 @@ mmax = 75
 mmin = 15
 lmax = 5
 lmin = 5
-mu = 30
-sigma = 6
+mu = 50
+sigma = 4
 a = 20
 #true_vals = [alpha, mmax, mmin, lmax, lmin, a, 1]
-#true_vals = [mu, sigma, a, 1]
+true_vals = [mu, sigma, a, 1]
 #true_vals = [50, 2, 100, 2.5, a, 1]
-true_vals = [25,4,55,5, a, 1]
+#true_vals = [25,4,55,5, a, 1]
 #true_vals = [38, 54, 45,60,6,4,5,7,0.4,0.1,0.2,0.3]
 #true_vals = [60,54,45,38,7,4,5,6,0.3,0.1,0.2,0.4, a,1]
 
-samp_file = '/Users/stefanorinaldi/Documents/mass_inference/bimodal_good/mass_function/all_samples.pkl'
+#samp_file = '/Users/stefanorinaldi/Documents/mass_inference/bimodal_good/mass_function/all_samples.pkl'
+samp_file = '/Users/stefanorinaldi/Documents/mass_inference/DPGMM/reconstructed_events/posteriors/posterior_functions_gaussian.pkl'
 openfile  = open(samp_file, 'rb')
 samples   = pickle.load(openfile)
 openfile.close()
 
-rec_file = '/Users/stefanorinaldi/Documents/mass_inference/bimodal_good/mass_function/log_joint_obs_prob_mf.txt'
+rec_file = '/Users/stefanorinaldi/Documents/mass_inference/DPGMM/reconstructed_events/rec_prob/log_rec_prob_gaussian.txt'
 rec = np.genfromtxt(rec_file, names = True)
 
 x = np.linspace(20, 40,400)
@@ -105,10 +106,10 @@ out_folder  = '/Users/stefanorinaldi/Documents/parametric/DP'
 #names = ['mu_1', 'sigma_1', 'mu_2', 'sigma_2']
 #bounds = [[40,60], [1,4], [90, 110], [1,4]]
 #labels = ['\mu_1', '\sigma_1', '\mu_2', '\sigma_2']
-names = ['mu1', 'sigma1', 'mu2','sigma2']
-bounds = [[10,40], [2,7],[40,70],[2,7]]
-labels = ['\mu_1', '\sigma_1','\mu_2','\sigma_2']
-selected_model = bimodal
+names = ['mu1', 'sigma1']#, 'mu2','sigma2']
+bounds = [[40,55], [2,7]]#,[40,70],[2,7]]
+labels = ['\mu_1', '\sigma_1']#,'\mu_2','\sigma_2']
+selected_model = gauss
 
 #names  = ['mu1','mu2','mu3', 'mu4', 's1', 's2', 's3', 's4', 'b1', 'b2','b3','b4']
 #bounds = [[58,70], [50,58], [40,50],[30,40], [1,8], [1,8], [1,8],[1,8], [0,1],[0,1],[0,1],[0,1]]
@@ -120,8 +121,8 @@ PE = DirichletProcess(
     names,
     bounds,
     samples,
-    15,
-    75,
+    40,
+    60,
     prior_pars = logPrior,
     max_a = 10,
     max_N = 200
@@ -161,6 +162,7 @@ ax  = fig.add_subplot(111)
 ax.fill_between(rec['m'], np.exp(rec['95']), np.exp(rec['5']), color = 'lightgreen', alpha = 0.5)
 ax.fill_between(rec['m'], np.exp(rec['84']), np.exp(rec['16']), color = 'aqua', alpha = 0.5)
 ax.plot(rec['m'], np.exp(rec['50']), color = 'r')
+print(*p)
 ax.plot(rec['m'], selected_model(rec['m'], *p), color = 'k')
 fig.savefig(os.path.join(out_folder,'compare_50.pdf'), bbox_inches='tight')
 
