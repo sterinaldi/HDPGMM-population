@@ -214,26 +214,45 @@ def main():
         exit()
     
     app = np.linspace(options.mmin, options.mmax, 1000)
-    try:
-        obs_mf = np.genfromtxt(options.output + '/mass_function/log_joint_obs_prob_mf.txt', names = True)
-    except:
-        obs_mf = np.genfromtxt(options.output + '/mass_function/log_rec_obs_prob_mf.txt', names = True)
-    percentiles = [50, 5, 16, 84, 95]
-    dm = obs_mf['m'][1]-obs_mf['m'][0]
-    mf = {}
-    for p in percentiles:
-        mf[p] = np.array([omf - np.log(sel_func(m)) for m, omf in zip(obs_mf['m'], obs_mf[str(p)])])
+    da = app[1]-app[0]
+    percentiles = [50, 5,16, 84, 95]
+
+    prob = []
+    norms = [np.log(np.sum(np.exp(sample(app))*sel_func(app)*da)) for sample in samples_set]
+    for ai in app:
+        prob.append([sample(ai) - np.log(sel_func(ai)) - n for sample, n in zip(samples_set, norms)])
+
+    log_draws_interp = []
+    for pr in np.array(prob).T:
+        log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
     
-    norm = np.exp(mf[50]).sum()*dm
+    
+    picklefile = open(options.output + '/mass_function/astro_posteriors.pkl', 'wb')
+    pickle.dump(log_draws_interp, picklefile)
+    picklefile.close()
+#    try:
+#        obs_mf = np.genfromtxt(options.output + '/mass_function/log_joint_obs_prob_mf.txt', names = True)
+#    except:
+#        obs_mf = np.genfromtxt(options.output + '/mass_function/log_rec_obs_prob_mf.txt', names = True)
+#    dm = obs_mf['m'][1]-obs_mf['m'][0]
+#    mf = {}
+#    for p in percentiles:
+#        mf[p] = np.array([omf - np.log(sel_func(m)) for m, omf in zip(obs_mf['m'], obs_mf[str(p)])])
+    mf = {}
+    for perc in percentiles:
+        mf[perc] = np.percentile(prob, perc, axis = 1)
+    norm = np.sum(np.exp(mf[50])*da)
+    for perc in percentiles:
+        mf[perc] = mf[perc] - np.log(norm)
     names = ['m']+[str(perc) for perc in percentiles]
     np.savetxt(options.output + '/mass_function/log_rec_prob_mf.txt',  np.array([app, mf[50], mf[5], mf[16], mf[84], mf[95]]).T, header = ' '.join(names))
 
     fig = plt.figure()
     fig.suptitle('Mass function')
     ax  = fig.add_subplot(111)
-    ax.fill_between(obs_mf['m'], np.exp(mf[95])/norm, np.exp(mf[5])/norm, color = 'lightgreen', alpha = 0.5, label = '$90\%\ CI$')
-    ax.fill_between(obs_mf['m'], np.exp(mf[84])/norm, np.exp(mf[16])/norm, color = 'aqua', alpha = 0.5, label = '$68\%\ CI$')
-    ax.plot(obs_mf['m'], np.exp(mf[50])/norm, marker = '', color = 'r', label = 'Reconstructed (with sel. effects)')
+    ax.fill_between(app, np.exp(mf[95]), np.exp(mf[5]), color = 'lightgreen', alpha = 0.5, label = '$90\%\ CI$')
+    ax.fill_between(app, np.exp(mf[84]), np.exp(mf[16]), color = 'aqua', alpha = 0.5, label = '$68\%\ CI$')
+    ax.plot(app, np.exp(mf[50]), marker = '', color = 'r', label = 'Reconstructed (with sel. effects)')
     
     if inj_density is not None:
         norm_density = np.sum([inj_density(ai)*dm for ai in obs_mf['m']])
