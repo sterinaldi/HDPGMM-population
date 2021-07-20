@@ -157,7 +157,7 @@ def main():
             sf = np.genfromtxt(options.selection_function)
             sel_func = interp1d(sf[:,0], sf[:,1], bounds_error = False, fill_value = (sf[:,1][0],sf[:,1][-1]))
     
-    if options.selection_function is not None:
+    if options.selection_function is not None and options.inj_density_file is not None:
         def filtered_density(x):
             return sel_func(x)*inj_density(x)
     else:
