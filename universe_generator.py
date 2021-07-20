@@ -41,7 +41,7 @@ def posterior_sampler(m_true, sigma):
     
 if __name__ == '__main__':
 
-    out_folder = '/Users/stefanorinaldi/Documents/mass_inference/uds/uds_10/'
+    out_folder = '/Users/stefanorinaldi/Documents/mass_inference/uds_r/uds_10/'
     if not os.path.exists(out_folder):
         os.mkdir(out_folder)
     post_folder = out_folder+'/events/'
@@ -78,8 +78,6 @@ if __name__ == '__main__':
     while i < n_bbh:
         j += 1
         m1 = mass_sampler(m_max, m_min, sup)
-        m2 = mass_sampler(m_max, m_min, sup)
-        m1 = np.max([m1,m2])
         if selfunc(m1) > uniform():
             sigma = np.exp(uniform(np.log(5), np.log(8)))
             samples = [s for s in normal(loc = m1, scale = sigma, size = n_samples) if s > 0]
