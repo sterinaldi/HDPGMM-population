@@ -254,7 +254,6 @@ class CGSampler:
                        m_max = self.m_max,
                        t_min = self.t_min,
                        t_max = self.t_max,
-                       verbose = self.verbose,
                        output_folder = self.mf_folder,
                        initial_cluster_number = min([self.icn, len(self.posterior_functions_events)]),
                        injected_density = self.injected_density,
