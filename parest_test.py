@@ -53,6 +53,7 @@ openfile.close()
 
 
 rec_file = '/Users/stefanorinaldi/Documents/mass_inference/bimodal_good/mass_function/log_joint_obs_prob_mf.txt'
+#rec_file = '/Users/stefanorinaldi/Documents/mass_inference/DPGMM/reconstructed_events/rec_prob/log_rec_prob_gaussian.txt'
 rec = np.genfromtxt(rec_file, names = True)
 
 x = np.linspace(20, 40,400)
@@ -125,7 +126,7 @@ PE = DirichletProcess(
     15,
     70,
     prior_pars = logPrior,
-    max_a = 100000,
+    max_a = 1e5,
     max_N = 100
     )
 
