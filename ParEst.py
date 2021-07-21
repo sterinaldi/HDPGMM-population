@@ -23,7 +23,7 @@ def log_norm(x, x0, s): return -((x-x0)**2)/(2*s*s) - np.log(np.sqrt(2*np.pi)) -
 
 class DirichletDistribution(cpnest.model.Model):
     
-    def __init__(self, model, pars, bounds, samples, x_min, x_max, probs, n = 30, prior_pars = lambda x: 0, max_a = 2000):
+    def __init__(self, model, pars, bounds, samples, x_min, x_max, probs, n = 30, prior_pars = lambda x: 0, max_a = 3):
     
         super(DirichletDistribution, self).__init__()
         self.samples    = samples
@@ -61,7 +61,7 @@ class DirichletDistribution(cpnest.model.Model):
 
 class DirichletProcess(cpnest.model.Model):
     
-    def __init__(self, model, pars, bounds, samples, x_min, x_max, prior_pars = lambda x: 0, max_a = 2000, max_N = 300):
+    def __init__(self, model, pars, bounds, samples, x_min, x_max, prior_pars = lambda x: 0, max_a = 10000, max_N = 300):
     
         super(DirichletProcess, self).__init__()
         self.samples    = samples
@@ -104,7 +104,8 @@ class DirichletProcess(cpnest.model.Model):
                 p = samp(m)
                 p = p + np.log(dm) - logsumexp(p+np.log(dm))
                 probs.append(p)
-            probs = np.array(probs)
+            probs = np.mean(probs, axis = 0)
+            probs = probs - logsumexp(probs+np.log(dm))
 #            t = [shuffle(p) for p in probs.T]
 #            probs = np.array([p - logsumexp(p) for p in probs])
             self.prec_probs[N] = probs
@@ -112,13 +113,13 @@ class DirichletProcess(cpnest.model.Model):
         pars = [x[lab] for lab in self.labels]
         base = np.array([self.model(mi, *pars)*dm for mi in m])
         base = base/(np.sum(base))
-        c_par = 10**x['a']
+        c_par = x['a']
         a = c_par*base
 #        p = np.array([probs[randint(self.n_samps), i] for i in range(N)])
-#        p = p - logsumexp(p)
+#        p = p - logsumexp(p+np.log(dm))
         #implemented as in scipy.stats.dirichlet.logpdf() w/o checks
         lnB = np.sum([numba_gammaln(ai) for ai in a]) - numba_gammaln(np.sum(a))
-        logL = - lnB + np.sum([my_dot(a-1, p) for p in probs])/self.n_samps#np.sum((xlogy(a-1, p.T)).T, 0)
+        logL = -lnB + my_dot(a-1, probs)#np.sum([my_dot(a-1, p) for p in probs])#/self.n_samps#np.sum((xlogy(a-1, p.T)).T, 0)
 #        logL = np.sum([ai*p + (c_par - ai)*log_sub(0,p) + gammaln(c_par) - gammaln(ai) - gammaln(c_par - ai) for ai, p in zip(a, probs.T)])
 #        logL = np.sum([beta(ai, c_par - ai).logpdf(p) for ai, p in zip(a, probs.T)])#- lnB + my_dot(a-1, p)#np.sum((xlogy(a-1, p.T)).T, 0)
         return logL
