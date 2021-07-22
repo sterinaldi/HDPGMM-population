@@ -7,10 +7,22 @@ import sys
 import importlib.util
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
+from matplotlib import rcParams
 import pickle
 from scipy.special import logsumexp
 from scipy.spatial.distance import jensenshannon as js
 
+rcParams["text.usetex"] = True
+rcParams["font.serif"] = "Computer Modern"
+rcParams["font.family"] = "Serif"
+rcParams["xtick.labelsize"]=14
+rcParams["ytick.labelsize"]=14
+rcParams["xtick.direction"]="in"
+rcParams["ytick.direction"]="in"
+rcParams["legend.fontsize"]=15
+rcParams["axes.labelsize"]=16
+rcParams["axes.grid"] = True
+rcParams["grid.alpha"] = 0.6
 
 def is_opt_provided (parser, dest):
     for opt in parser._get_all_options():
@@ -34,11 +46,10 @@ def plot_samples(samples, m_min, m_max, output, injected_density = None, filtere
         p = {}
         
         fig = plt.figure()
-        fig.suptitle('Observed mass function')
         ax  = fig.add_subplot(111)
         if true_masses is not None:
             truths = np.genfromtxt(true_masses, names = True)
-            ax.hist(truths['m'], bins = int(np.sqrt(len(truths['m']))), histtype = 'step', density = True, label = '$Masses$')
+            ax.hist(truths['m'], bins = int(np.sqrt(len(truths['m']))), histtype = 'step', density = True, label = r"\textsc{True masses}")
         prob = []
         for a in app:
             prob.append([sample(a) for sample in samples])
@@ -53,13 +64,13 @@ def plot_samples(samples, m_min, m_max, output, injected_density = None, filtere
         for perc in percentiles:
             p[perc] = np.exp(np.percentile(prob, perc, axis = 1))
         
-        ax.fill_between(app, p[95]/norm, p[5]/norm, color = 'lightgreen', alpha = 0.5, label = '$90\%\ CI$')
-        ax.fill_between(app, p[84]/norm, p[16]/norm, color = 'aqua', alpha = 0.5, label = '$68\%\ CI$')
-        ax.plot(app, p[50]/norm, marker = '', color = 'r', label = '$Reconstructed$')
+        ax.fill_between(app, p[95]/norm, p[5]/norm, color = 'mediumturquoise', alpha = 0.5)#, label = r"\textsc{90% CI}")
+        ax.fill_between(app, p[84]/norm, p[16]/norm, color = 'darkturquoise', alpha = 0.5)#, label = r"\textsc{68% CI}")
+        ax.plot(app, p[50]/norm, marker = '', color = 'steelblue', label = r"\textsc{Reconstructed}", zorder = 100)
         if injected_density is not None:
             norm = np.sum([injected_density(a)*(app[1]-app[0]) for a in app])
             density = np.array([injected_density(a)/norm for a in app])
-            ax.plot(app, density, color = 'm', marker = '', linewidth = 0.7, label = '$Simulated - Astro$')
+            ax.plot(app, density, color = 'r', marker = '', linewidth = 0.8, label = r"\textsc{Simulated - Astrophysical}")
             ent = [js(np.exp(s(app)), density) for s in samples]
             JSD = {}
             for perc in percentiles:
@@ -69,7 +80,7 @@ def plot_samples(samples, m_min, m_max, output, injected_density = None, filtere
         if filtered_density is not None:
             norm = np.sum([filtered_density(a)*(app[1]-app[0]) for a in app])
             f_density = np.array([filtered_density(a)/norm for a in app])
-            ax.plot(app, f_density, color = 'k', marker = '', linewidth = 0.7, label = '$Simulated - Obs$')
+            ax.plot(app, f_density, color = 'k', marker = '', linewidth = 0.8, label = r"\textsc{Simulated - Observed}")
             ent = np.array([js(np.exp(s(app)), f_density) for s in samples])
             JSD = {}
             for perc in percentiles:
@@ -77,7 +88,8 @@ def plot_samples(samples, m_min, m_max, output, injected_density = None, filtere
             print('Jensen-Shannon distance: {0}+{1}-{2} nats (filtered)'.format(JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]))
             np.savetxt(output + '/filtered_joint_relative_entropy.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
         
-        plt.legend(loc = 0)
+        ax.grid(True,dashes=(1,3))
+        ax.legend(loc=0,frameon=False,fontsize=10)
         ax.set_xlabel('$M\ [M_\\odot]$')
         ax.set_ylabel('$p(M)$')
         plt.savefig(output + '/joint_mass_function.pdf', bbox_inches = 'tight')
@@ -248,19 +260,19 @@ def main():
     np.savetxt(options.output + '/mass_function/log_rec_prob_mf.txt',  np.array([app, mf[50], mf[5], mf[16], mf[84], mf[95]]).T, header = ' '.join(names))
 
     fig = plt.figure()
-    fig.suptitle('Mass function')
     ax  = fig.add_subplot(111)
-    ax.fill_between(app, np.exp(mf[95]), np.exp(mf[5]), color = 'lightgreen', alpha = 0.5, label = '$90\%\ CI$')
-    ax.fill_between(app, np.exp(mf[84]), np.exp(mf[16]), color = 'aqua', alpha = 0.5, label = '$68\%\ CI$')
-    ax.plot(app, np.exp(mf[50]), marker = '', color = 'r', label = 'Reconstructed (with sel. effects)')
+    ax.fill_between(app, np.exp(mf[95]), np.exp(mf[5]), color = 'mediumturquoise', alpha = 0.5)#, label = r"\textsc{90% CI}")
+    ax.fill_between(app, np.exp(mf[84]), np.exp(mf[16]), color = 'darkturquoise', alpha = 0.5)#, label = r"\textsc{68% CI}")
+    ax.plot(app, np.exp(mf[50]), marker = '', color = 'steelblue', label = r"\textsc{Reconstructed (with sel. effects)}", zorder = 100)
     
     if inj_density is not None:
-        norm_density = np.sum([inj_density(ai)*dm for ai in obs_mf['m']])
-        ax.plot(obs_mf['m'], [inj_density(a)/norm_density for a in obs_mf['m']], marker = '', color = 'm', linewidth = 0.7, label = 'Simulated - Astrophysical')
+        norm_density = np.sum([inj_density(ai)*da for ai in app])
+        ax.plot(app, [inj_density(a)/norm_density for a in app], marker = '', color = 'r', linewidth = 0.8, label = r"\textsc{Simulated - Astrophysical}")
     ax.set_ylim(np.min(np.exp(mf[50])))
     ax.set_xlabel('$M\ [M_\\odot]$')
     ax.set_ylabel('$p(M)$')
-    ax.legend(loc = 0)
+    ax.grid(True,dashes=(1,3))
+    ax.legend(loc=0,frameon=False,fontsize=10)
     plt.savefig(options.output + '/mass_function/mass_function.pdf', bbox_inches = 'tight')
     ax.set_yscale('log')
     ax.set_ylim([1e-3,10])

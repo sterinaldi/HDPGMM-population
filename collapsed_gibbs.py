@@ -24,6 +24,20 @@ from ray.util.multiprocessing import Pool
 
 from utils import integrand, compute_norm_const, log_norm
 
+from matplotlib import rcParams
+
+rcParams["text.usetex"] = True
+rcParams["font.serif"] = "Computer Modern"
+rcParams["font.family"] = "Serif"
+rcParams["xtick.labelsize"]=14
+rcParams["ytick.labelsize"]=14
+rcParams["xtick.direction"]="in"
+rcParams["ytick.direction"]="in"
+rcParams["legend.fontsize"]=15
+rcParams["axes.labelsize"]=16
+rcParams["axes.grid"] = True
+rcParams["grid.alpha"] = 0.6
+
 """
 Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
 """
@@ -695,9 +709,9 @@ class SE_Sampler:
         self.sample_probs = prob
         self.median_mf = np.array(p[50])
         
-        ax.fill_between(app, p[95], p[5], color = 'lightgreen', alpha = 0.5)
-        ax.fill_between(app, p[84], p[16], color = 'aqua', alpha = 0.5)
-        ax.plot(app, p[50], marker = '', color = 'r')
+        ax.fill_between(app, p[95], p[5], color = 'mediumturquoise', alpha = 0.5)
+        ax.fill_between(app, p[84], p[16], color = 'darkturquoise', alpha = 0.5)
+        ax.plot(app, p[50], marker = '', color = 'steelblue', zorder = 100)
         ax.set_xlabel('$M\ [M_\\odot]$')
         ax.set_ylabel('$p(M)$')
         ax.set_xlim(lower_bound, upper_bound)
@@ -1097,13 +1111,13 @@ class MF_Sampler():
         for perc in percentiles:
             p[perc] = p[perc]/normalisation
         
-        ax.fill_between(app, p[95], p[5], color = 'lightgreen', alpha = 0.5)
-        ax.fill_between(app, p[84], p[16], color = 'aqua', alpha = 0.5)
-        ax.plot(app, p[50], marker = '', color = 'r')
+        ax.fill_between(app, p[95], p[5], color = 'aqua', alpha = 0.5)
+        ax.fill_between(app, p[84], p[16], color = 'turquoise', alpha = 0.5)
+        ax.plot(app, p[50], marker = '', color = 'royalblue', zorder = 100)
         if self.injected_density is not None:
             norm = np.sum([self.injected_density(a)*(app[1]-app[0]) for a in app])
             density = np.array([self.injected_density(a)/norm for a in app])
-            ax.plot(app, density, color = 'm', marker = '', linewidth = 0.7)
+            ax.plot(app, density, color = 'k', marker = '', linewidth = 0.8)
         ax.set_xlabel('$M\ [M_\\odot]$')
         ax.set_ylabel('$p(M)$')
         ax.set_xlim(self.m_min*1.1, self.m_max_plot)
