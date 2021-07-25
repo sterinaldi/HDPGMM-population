@@ -38,10 +38,11 @@ lmin = 5
 mu = 50
 sigma = 4
 a = 20
+g = 20
 #true_vals = [alpha, mmax, mmin, lmax, lmin, a, 1]
 #true_vals = [mu, sigma, a, 1]
 #true_vals = [50, 2, 100, 2.5, a, 1]
-true_vals = [25,4,55,5, a, 1]
+true_vals = [25,4,55,5, a, g, 1]
 #true_vals = [38, 54, 45,60,6,4,5,7,0.4,0.1,0.2,0.3]
 #true_vals = [60,54,45,38,7,4,5,6,0.3,0.1,0.2,0.4, a,1]
 
@@ -126,8 +127,9 @@ PE = DirichletProcess(
     15,
     70,
     prior_pars = logPrior,
-    max_a = 1e5,
-    max_N = 100
+    max_a = 1000,
+    max_g = 200,
+    max_N = 20
     )
 
 work = cpnest.CPNest(PE,
@@ -140,9 +142,9 @@ work = cpnest.CPNest(PE,
 work.run()
 print('log Evidence: {0}'.format(work.NS.logZ))
 
-labels = labels + ['\\alpha', 'N']
+labels = labels + ['\\alpha', '\\gamma', 'N']
 par_names = names
-names = names + ['a','N']
+names = names + ['a','g', 'N']
 #x = np.genfromtxt('/Users/stefanorinaldi/Documents/parametric/DP/nested_samples.dat', names = True).ravel()
 x = work.posterior_samples.ravel()
 #x['b1'] = x['b1']/(x['b1']+x['b2']+x['b3']+x['b4'])
