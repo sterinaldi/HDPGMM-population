@@ -665,7 +665,7 @@ class SE_Sampler:
         
         fig = plt.figure()
         ax  = fig.add_subplot(111)
-        ax.hist(self.initial_samples, bins = int(np.sqrt(len(self.initial_samples))), histtype = 'step', density = True)
+        ax.hist(self.initial_samples, bins = int(np.sqrt(len(self.initial_samples))), histtype = 'step', density = True, label = r"\textsc{Mass samples}")
         prob = []
         for ai in app:
             a = self.transform(ai)
@@ -711,10 +711,12 @@ class SE_Sampler:
         
         ax.fill_between(app, p[95], p[5], color = 'mediumturquoise', alpha = 0.5)
         ax.fill_between(app, p[84], p[16], color = 'darkturquoise', alpha = 0.5)
-        ax.plot(app, p[50], marker = '', color = 'steelblue', zorder = 100)
+        ax.plot(app, p[50], marker = '', color = 'steelblue', label = r"\textsc{Reconstructed}", zorder = 100)
         ax.set_xlabel('$M\ [M_\\odot]$')
         ax.set_ylabel('$p(M)$')
         ax.set_xlim(lower_bound, upper_bound)
+        ax.grid(True,dashes=(1,3))
+        ax.legend(loc=0,frameon=False,fontsize=10)
         plt.savefig(self.output_pltevents + '/{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
         fig = plt.figure()
         ax = fig.add_subplot(111)
@@ -1075,7 +1077,7 @@ class MF_Sampler():
         ax  = fig.add_subplot(111)
         if self.true_masses is not None:
             truths = np.genfromtxt(self.true_masses, names = True)
-            ax.hist(truths['m'], bins = int(np.sqrt(len(truths['m']))), histtype = 'step', density = True)
+            ax.hist(truths['m'], bins = int(np.sqrt(len(truths['m']))), histtype = 'step', density = True, label = r"\textsc{True masses}")
         prob = []
         for ai in app:
             a = self.transform(ai)
@@ -1111,16 +1113,18 @@ class MF_Sampler():
         for perc in percentiles:
             p[perc] = p[perc]/normalisation
         
-        ax.fill_between(app, p[95], p[5], color = 'aqua', alpha = 0.5)
-        ax.fill_between(app, p[84], p[16], color = 'turquoise', alpha = 0.5)
-        ax.plot(app, p[50], marker = '', color = 'royalblue', zorder = 100)
+        ax.fill_between(app, p[95], p[5], color = 'mediumturquoise', alpha = 0.5)
+        ax.fill_between(app, p[84], p[16], color = 'darkturquoise', alpha = 0.5)
+        ax.plot(app, p[50], marker = '', color = 'steelblue', label = r"\textsc{Reconstructed}", zorder = 100)
         if self.injected_density is not None:
             norm = np.sum([self.injected_density(a)*(app[1]-app[0]) for a in app])
             density = np.array([self.injected_density(a)/norm for a in app])
-            ax.plot(app, density, color = 'k', marker = '', linewidth = 0.8)
+            ax.plot(app, density, color = 'k', marker = '', linewidth = 0.8, label = r"\textsc{Simulated - Observed}")
         ax.set_xlabel('$M\ [M_\\odot]$')
         ax.set_ylabel('$p(M)$')
         ax.set_xlim(self.m_min*1.1, self.m_max_plot)
+        ax.grid(True,dashes=(1,3))
+        ax.legend(loc=0,frameon=False,fontsize=10)
         plt.savefig(self.output_events + '/obs_mass_function.pdf', bbox_inches = 'tight')
         ax.set_yscale('log')
         ax.set_ylim(np.min(p[50]))
