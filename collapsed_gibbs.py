@@ -25,6 +25,21 @@ from ray.util.multiprocessing import Pool
 from utils import integrand, compute_norm_const, log_norm
 
 from matplotlib import rcParams
+from numba import jit, njit
+from numba.extending import get_cython_function_address
+import ctypes
+
+_PTR = ctypes.POINTER
+_dble = ctypes.c_double
+_ptr_dble = _PTR(_dble)
+
+addr = get_cython_function_address("scipy.special.cython_special", "gammaln")
+functype = ctypes.CFUNCTYPE(_dble, _dble)
+gammaln_float64 = functype(addr)
+
+@njit
+def numba_gammaln(x):
+  return gammaln_float64(x)
 
 rcParams["text.usetex"] = True
 rcParams["font.serif"] = "Computer Modern"
@@ -297,7 +312,7 @@ class CGSampler:
         print('Elapsed time: {0}h {1}m {2}s'.format(h, m, s))
         return
         
-
+@jit
 def my_student_t(df, t):
     '''
     Student-t log pdf
@@ -309,8 +324,8 @@ def my_student_t(df, t):
     Returns:
         :float: student_t(df).logpdf(t)
     '''
-    b = betaln(0.5, df*0.5)
-    return -0.5*np.log(df*np.pi)-b-((df+1)*0.5)*np.log1p(t*t/df)
+    lnB =numba_gammaln(0.5)+ numba_gammaln(0.5*df) - numba_gammaln(0.5 + 0.5*df)
+    return -0.5*np.log(df*np.pi) - lnB - ((df+1)*0.5)*np.log1p(t*t/df)
     
 @ray.remote
 class SE_Sampler:
