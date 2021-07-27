@@ -73,7 +73,7 @@ def integrator(qs, ai, g):
 
 @jit(nopython = True)
 def integrand(q, logqs, log1mqs, a, n, g):
-    return np.sum(logqs*(g*q-1)) + np.sum(log1mqs*(g*(1-q)-1)) + (a-1)*np.log(q) - n*numba_gammaln(g*q) - n*numba_gammaln(g*(1-q)) + numba_gammaln(g)
+    return np.sum(logqs*(g*q-1)) + np.sum(log1mqs*(g*(1-q)-1)) + (a-1)*np.log(q) - n*numba_gammaln(g*q) - n*numba_gammaln(g*(1-q)) + n*numba_gammaln(g)
 
 
 class DirichletDistribution(cpnest.model.Model):
@@ -137,7 +137,7 @@ class DirichletProcess(cpnest.model.Model):
     
         logP = super(DirichletProcess,self).log_prior(x)
         if np.isfinite(logP):
-            logP = -np.log(x['N']) - x['a']# - x['g']# - self.prior_norm
+            logP = 0#-np.log(x['N']) - x['a'] - x['g']# - self.prior_norm
             pars = [x[lab] for lab in self.labels]
             logP += self.prior_pars(*pars)
         return logP
@@ -173,6 +173,7 @@ class DirichletProcess(cpnest.model.Model):
 #            means = np.mean(probs, axis = 0)
 #            means = means - logsumexp(means+np.log(dm))
 #            std   = np.std(probs, axis = 0)
+
             self.prec_probs[N] = probs
         
 #        means = np.mean(probs, axis = 0)
