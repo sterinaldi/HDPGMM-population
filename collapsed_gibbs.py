@@ -312,7 +312,7 @@ class CGSampler:
         print('Elapsed time: {0}h {1}m {2}s'.format(h, m, s))
         return
         
-@jit
+
 def my_student_t(df, t):
     '''
     Student-t log pdf
