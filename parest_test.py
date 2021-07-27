@@ -27,7 +27,7 @@ def four_g(x,x0,x1,x2,x3,s0,s1,s2,s3,b0,b1,b2,b3):
     return (b0*np.exp(-((x-x0)**2/(2*s0**2)))/(np.sqrt(2*np.pi)*s0) + b1*np.exp(-((x-x1)**2/(2*s1**2)))/(np.sqrt(2*np.pi)*s1)+ b2*np.exp(-((x-x2)**2/(2*s2**2)))/(np.sqrt(2*np.pi)*s2)+ b3*np.exp(-((x-x3)**2/(2*s3**2)))/(np.sqrt(2*np.pi)*s3))/(4*(b1+b2+b3+b0))
 
 def logPrior(*args):
-    return 0
+    return -args[1]#-args[0]
  
 #
 alpha = 1.1
@@ -42,7 +42,8 @@ g = 20
 #true_vals = [alpha, mmax, mmin, lmax, lmin, a, 1]
 #true_vals = [mu, sigma, a, 1]
 #true_vals = [50, 2, 100, 2.5, a, 1]
-true_vals = [25,4,55,5, a, g, 1]
+#true_vals = [25,4,55,5, a, g, 1]
+true_vals  = [0,0,a,g,1]
 #true_vals = [38, 54, 45,60,6,4,5,7,0.4,0.1,0.2,0.3]
 #true_vals = [60,54,45,38,7,4,5,6,0.3,0.1,0.2,0.4, a,1]
 
@@ -109,10 +110,10 @@ out_folder  = '/Users/stefanorinaldi/Documents/parametric/DP'
 #names = ['mu_1', 'sigma_1', 'mu_2', 'sigma_2']
 #bounds = [[40,60], [1,4], [90, 110], [1,4]]
 #labels = ['\mu_1', '\sigma_1', '\mu_2', '\sigma_2']
-names = ['mu1', 'sigma1', 'mu2','sigma2']
-bounds = [[20,50], [2,7],[40,70],[2,7]]
-labels = ['\mu_1', '\sigma_1','\mu_2','\sigma_2']
-selected_model = bimodal
+names = ['mu1', 'sigma1',]# 'mu2','sigma2']
+bounds = [[20,60], [2,20]]#,[40,70],[2,7]]
+labels = ['\mu_1', '\sigma_1']#,'\mu_2','\sigma_2']
+selected_model = gauss
 
 #names  = ['mu1','mu2','mu3', 'mu4', 's1', 's2', 's3', 's4', 'b1', 'b2','b3','b4']
 #bounds = [[58,70], [50,58], [40,50],[30,40], [1,8], [1,8], [1,8],[1,8], [0,1],[0,1],[0,1],[0,1]]
@@ -124,8 +125,8 @@ PE = DirichletProcess(
     names,
     bounds,
     samples,
-    15,
-    70,
+    20,
+    65,
     prior_pars = logPrior,
     max_a = 1000,
     max_g = 200,
@@ -168,5 +169,6 @@ ax.fill_between(rec['m'], np.exp(rec['84']), np.exp(rec['16']), color = 'aqua', 
 ax.plot(rec['m'], np.exp(rec['50']), color = 'r')
 print(*p)
 ax.plot(rec['m'], selected_model(rec['m'], *p), color = 'k')
+
 fig.savefig(os.path.join(out_folder,'compare_50.pdf'), bbox_inches='tight')
 
