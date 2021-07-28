@@ -26,55 +26,56 @@ def log_norm(x, x0, s): return -((x-x0)**2)/(2*s*s) - np.log(np.sqrt(2*np.pi)) -
 def my_betaln(x, logx, a1, a0):
     return gammaln(a1 + a0) - gammaln(a1) - gammaln(a0) + (a1-1)*logx + (a0-1)*log1p(-x)
 
-#@jit
-#def integrand(logq, m, s2, n, a, nu, p):
-#    """
-#    logq: logaritmo di ^q
-#    m: media dei logaritmi
-#    s2: varianza dei logaritmi
-#    n: numero di estrazioni
-#    a: alpha*H(xi)
-#    nu: n-1
-#    p: -(n+1)/2
-#    """
-##    d = (logq - m)
-##    t2 = n*d*d/s2
-#    return np.log1p(t2/nu)*p + a*logq
-#
-##    return (1 + t2/nu)**p*np.exp((a)*logq)
-#
-#def integrator(m, s, n, a):
-#    logqs = np.linspace(m-3*s, m+3*s,100)
-##    logq = (logqs[1]-logqs[0])
-#    dlogq = np.log(logqs[1]-logqs[0])
-#    I = -np.inf
-#    s2 = s**2
-#    p  = -(n+1)/2.
-#    nu = n-1
-#    for logq in logqs:
-#        I = log_add(integrand(logq, m, s2, n, a, nu, p) + dlogq, I)
-#
-#    return I + gammaln(-p) - gammaln(nu/2.) - 0.5*np.log(nu*np.pi)#np.log(I)
-
 @jit
-def integrator(qs, ai, g):
-#    hatq  = np.linspace(np.min(qs), np.max(qs),100)
-    N = 30
-    dq = (np.max(qs) - np.min(qs))/N
-    logdq = np.log(dq)#hatq[1] - hatq[0])
+def integrand(logq, m, s2, n, a, nu, p, lnB):
+    """
+    logq: logaritmo di ^q
+    m: media dei logaritmi
+    s2: varianza dei logaritmi
+    n: numero di estrazioni
+    a: alpha*H(xi)
+    nu: n-1
+    p: -(n+1)/2
+    """
+#    d = (logq - m)
+#    t2 = n*d*d/s2
+#    return np.log1p(t2/nu)*p + a*logq
+    return -(logq-m)**2/(2*s2) - logq -0.5*np.log(2*np.pi*s2) + (a-1)*logq - lnB
+
+#    return (1 + t2/nu)**p*np.exp((a)*logq)
+@jit
+def integrator(m, s, n, a, lnB):
+    logqs = np.linspace(np.exp(m-3*s), np.exp(m+3*s),100)
+#    logq = (logqs[1]-logqs[0])
+    dlogq = np.log(logqs[1]-logqs[0])
     I = -np.inf
-    log1mqs = np.log(1 - qs)
-    logqs = np.log(qs)
-    qmin = np.min(qs)
-    n = len(qs)
-    for i in range(N):
-        I = log_add(integrand(qmin + i*dq , logqs, log1mqs, ai, n, g) + logdq, I)
-    return I
+    s2 = s**2
+    p  = -(n+1)/2.
+    nu = n-1
+    for logq in np.log(logqs):
+        I = log_add(integrand(logq, m, s2, n, a, nu, p, lnB) + dlogq, I)
 
-@jit(nopython = True)
-def integrand(q, logqs, log1mqs, a, n, g):
-    return np.sum(logqs*(g*q-1)) + np.sum(log1mqs*(g*(1-q)-1)) + (a-1)*np.log(q) - n*numba_gammaln(g*q) - n*numba_gammaln(g*(1-q)) + n*numba_gammaln(g)
+    return I #+ numba_gammaln(-p) #- numba_gammaln(nu/2.) #- 0.5*np.log(nu*np.pi)#np.log(I)
 
+#@jit
+#def integrator(qs, ai, g):
+##    hatq  = np.linspace(np.min(qs), np.max(qs),100)
+#    N = 30
+#    dq = (np.max(qs) - np.min(qs))/N
+#    logdq = np.log(dq)#hatq[1] - hatq[0])
+#    I = -np.inf
+#    log1mqs = np.log(1 - qs)
+#    logqs = np.log(qs)
+#    qmin = np.min(qs)
+#    n = len(qs)
+#    for i in range(N):
+#        I = log_add(integrand(qmin + i*dq , logqs, log1mqs, ai, n, g) + logdq, I)
+#    return I
+#
+#@jit(nopython = True)
+#def integrand(q, logqs, log1mqs, a, n, g):
+#    return np.sum(logqs*(g*q-1)) + np.sum(log1mqs*(g*(1-q)-1)) + (a-1)*np.log(q) - n*numba_gammaln(g*q) - n*numba_gammaln(g*(1-q)) + n*numba_gammaln(g)
+#
 
 class DirichletDistribution(cpnest.model.Model):
     
@@ -128,7 +129,7 @@ class DirichletProcess(cpnest.model.Model):
         self.x_min      = x_min
         self.x_max      = x_max
         self.model      = model
-        self.prior_norm = np.log(1/bounds[-1][0]**2 - 1/bounds[-1][1]**2) + np.log(np.exp(-bounds[-2][0]) - np.exp(-bounds[-2][1]))
+        self.prior_norm = np.log(np.exp(-self.bounds[-2][0])-np.exp(-self.bounds[-2][1]))
         self.prec_probs = {}
         self.p          = Pool(nthreads)
 
@@ -137,7 +138,7 @@ class DirichletProcess(cpnest.model.Model):
     
         logP = super(DirichletProcess,self).log_prior(x)
         if np.isfinite(logP):
-            logP = 0#-np.log(x['N']) - x['a'] - x['g']# - self.prior_norm
+            logP = -x['a'] - self.prior_norm #-np.log(x['N'])  - x['g']# - self.prior_norm
             pars = [x[lab] for lab in self.labels]
             logP += self.prior_pars(*pars)
         return logP
@@ -148,9 +149,9 @@ class DirichletProcess(cpnest.model.Model):
         dm = m[1] - m[0]
         ns = self.n_samps*np.ones(N)
         if N in self.prec_probs.keys():
-            probs = self.prec_probs[N]
-#            means = self.prec_probs[N][0]
-#            std   = self.prec_probs[N][1]
+#            probs = self.prec_probs[N]
+            means = self.prec_probs[N][0]
+            std   = self.prec_probs[N][1]
         else:
             probs = []
             for samp in self.samples:
@@ -170,11 +171,11 @@ class DirichletProcess(cpnest.model.Model):
 #            t = [shuffle(p) for p in probs.T]
 #            probs = np.array([p - logsumexp(p) for p in probs])
             probs = np.array([p/np.sum(p) for p in probs])
-#            means = np.mean(probs, axis = 0)
+            means = np.mean(np.log(probs), axis = 0)
 #            means = means - logsumexp(means+np.log(dm))
-#            std   = np.std(probs, axis = 0)
+            std   = np.std(np.log(probs), axis = 0)
 
-            self.prec_probs[N] = probs
+            self.prec_probs[N] = [means, std]#probs
         
 #        means = np.mean(probs, axis = 0)
 #        means = means - logsumexp(means+np.log(dm))
@@ -193,7 +194,7 @@ class DirichletProcess(cpnest.model.Model):
 #        vals = [[mi,si,ni,ai] for mi,si,ni,ai in zip(means, std, ns, a)]
 #        integrals = self.p.map(integrator, [[p,ai] for p, ai in zip(probs.T, a)])
         for i in prange(N):
-            integrals[i] = integrator(probs[:,i], a[i], g)#(means[i], std[i], ns[i], a[i])
+            integrals[i] = integrator(means[i], std[i], ns[i], a[i], lnB) #integrator(probs[:,i], a[i], g)#
         logL = - lnB + np.sum(integrals)#[integrator(ms, ss, ns, ai) for ms, ss, ai in zip(means, std, a)])#my_dot(a-1, probs)#np.sum([my_dot(a-1, p) for p in probs])#/self.n_samps#np.sum((xlogy(a-1, p.T)).T, 0)
 #        logL = np.sum([ai*p + (c_par - ai)*log_sub(0,p) + gammaln(c_par) - gammaln(ai) - gammaln(c_par - ai) for ai, p in zip(a, probs.T)])
 #        logL = np.sum([beta(ai, c_par - ai).logpdf(p) for ai, p in zip(a, probs.T)])#- lnB + my_dot(a-1, p)#np.sum((xlogy(a-1, p.T)).T, 0)
