@@ -128,11 +128,11 @@ PE = DirichletProcess(
     names,
     bounds,
     samples,
-    40,
-    60,
+    43,
+    57,
     prior_pars = logPrior,
-    max_a = 100000,
-    max_g = 100000,
+    max_a = 10000,
+    max_g = 1000,
     max_N = 30
     )
 
@@ -171,7 +171,7 @@ ax.fill_between(rec['m'], np.exp(rec['95']), np.exp(rec['5']), color = 'lightgre
 ax.fill_between(rec['m'], np.exp(rec['84']), np.exp(rec['16']), color = 'aqua', alpha = 0.5)
 ax.plot(rec['m'], np.exp(rec['50']), color = 'r')
 print(*p)
-ax.plot(rec['m'], selected_model(rec['m'], *[50,4]), color = 'k')
+ax.plot(rec['m'], selected_model(rec['m'], *p), color = 'k')
 
 fig.savefig(os.path.join(out_folder,'compare_50.pdf'), bbox_inches='tight')
 
