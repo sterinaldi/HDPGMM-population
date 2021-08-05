@@ -593,8 +593,8 @@ class SE_Sampler:
         for _ in range(thinning):
             a_new = a_old + random.RandomState().uniform(-1,1)*0.5
             if a_new > 0:
-                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old)
-                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new)
+                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
+                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
                 if logP_new - logP_old > np.log(random.uniform()):
                     a_old = a_new
         return a_old
@@ -1033,8 +1033,8 @@ class MF_Sampler():
         for _ in range(trimming):
             a_new = a_old + random.RandomState().uniform(-1,1)*0.5#.gamma(1)
             if a_new > 0:
-                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old)
-                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new)
+                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
+                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
                 if logP_new - logP_old > np.log(random.uniform()):
                     a_old = a_new
         return a_old
