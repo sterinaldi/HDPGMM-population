@@ -96,6 +96,12 @@ def plot_samples(samples, m_min, m_max, output, injected_density = None, filtere
         ax.set_yscale('log')
         ax.set_ylim(np.min(p[50]))
         plt.savefig(output + '/log_joint_mass_function.pdf', bbox_inches = 'tight')
+        
+def save_options(options):
+    logfile = open(options.output + '/options_log.txt', 'w')
+    for key, val in zip(vars(options).keys(), vars(options).values()):
+        logfile.write('{0}: {1}\n'.format(key,val))
+    logfile.close()
 
 def main():
     '''
@@ -123,6 +129,9 @@ def main():
     parser.add_option("--join", dest = "join", help = "Join samples from different runs", action = 'store_true', default = False)
     (options, args) = parser.parse_args()
     
+    options.events_path = os.path.abspath(options.events_path)
+    options.output      = os.path.abspath(options.output)
+    
     if options.optfile is not None:
         config = configparser.ConfigParser()
         config.read(options.optfile)
@@ -143,7 +152,7 @@ def main():
     if options.samp_settings_ev is not None:
         options.samp_settings_ev = [int(x) for x in options.samp_settings_ev.split(',')]
     
-    event_files = [options.events_path+f for f in os.listdir(options.events_path) if not f.startswith('.')]
+    event_files = [options.events_path+'/'+f for f in os.listdir(options.events_path) if not f.startswith('.')]
     events      = []
     names       = []
     
@@ -174,7 +183,9 @@ def main():
             return sel_func(x)*inj_density(x)
     else:
         filtered_density = inj_density
-        
+    
+    save_options(options)
+    exit()
     if not bool(options.postprocessing):
         sampler = DPGMM.CGSampler(events = events,
                               samp_settings = options.samp_settings,
