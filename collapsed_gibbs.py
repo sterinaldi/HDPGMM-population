@@ -1081,7 +1081,7 @@ class MF_Sampler():
         Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
         """
         
-        app  = np.linspace(self.m_min*1.1, self.m_max_plot, 1000)
+        app  = np.linspace(self.m_min, self.m_max_plot, 1000)
         da = app[1]-app[0]
         percentiles = [50, 5,16, 84, 95]
         
