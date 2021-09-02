@@ -1191,7 +1191,7 @@ class MF_Sampler():
         except:
             samps = []
         
-        app  = np.linspace(self.m_min*1.1, self.m_max_plot, 1000)
+        app  = np.linspace(self.m_min, self.m_max_plot, 1000)
         da = app[1]-app[0]
         prob = []
         for ai in app:
