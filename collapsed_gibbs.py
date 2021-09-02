@@ -838,7 +838,7 @@ class MF_Sampler():
         self.step    = step
         self.m_min   = m_min
         self.m_max   = m_max
-        
+        print(self.m_min, self.m_max)
         if transformed:
             self.t_min = t_min
             self.t_max = t_max
