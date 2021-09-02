@@ -838,7 +838,6 @@ class MF_Sampler():
         self.step    = step
         self.m_min   = m_min
         self.m_max   = m_max
-        print(self.m_min, self.m_max)
         if transformed:
             self.t_min = t_min
             self.t_max = t_max
@@ -1080,7 +1079,7 @@ class MF_Sampler():
         """
         Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
         """
-        
+        print(self.m_min, self.m_max_plot)
         app  = np.linspace(self.m_min, self.m_max_plot, 1000)
         da = app[1]-app[0]
         percentiles = [50, 5,16, 84, 95]
