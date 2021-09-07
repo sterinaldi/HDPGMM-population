@@ -62,7 +62,11 @@ Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
 
 def sort_matrix(a, axis = -1):
     '''
-    Matrix sorting algorithm
+    2d matrix sorting algorithm.
+    
+    Arguments:
+        :np.ndarray a: the matrix to be sorted
+        :int axis:     t
     '''
     mat = np.array([[m, f] for m, f in zip(a[0], a[1])])
     keys = np.array([x for x in mat[:,axis]])
@@ -74,6 +78,15 @@ def sort_matrix(a, axis = -1):
     
 
 def atoi(text):
+    '''
+    Converts string to integers (if number).
+    
+    Arguments:
+        :str text: string to be converted
+    
+    Returns:
+        :int or str: the converted string
+    '''
     return int(text) if text.isdigit() else text
 
 def natural_keys(text):
@@ -195,6 +208,12 @@ class CGSampler:
     def initialise_samplers(self, marker):
         '''
         Initialises n_parallel_threads instances of SE_Sampler class
+        
+        Arguments:
+            :float marker: index from where to begin with index slicing
+        
+        Returns:
+            :list: list of SE_samplers ready to run
         '''
         event_samplers = []
         for i, (ev, t_ev) in enumerate(zip(self.events[marker:marker+self.n_parallel_threads], self.transformed_events[marker:marker+self.n_parallel_threads])):
@@ -223,7 +242,7 @@ class CGSampler:
         
     def run_event_sampling(self):
         '''
-        Performs analysis on each event
+        Runs all the single-event analysis.
         '''
         if self.verbose:
             ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads)
@@ -244,7 +263,7 @@ class CGSampler:
     
     def load_mixtures(self):
         '''
-        Loads results from previously analysed events
+        Loads results from previously analysed events.
         '''
         print('Loading mixtures...')
         self.posterior_functions_events = []
@@ -267,7 +286,7 @@ class CGSampler:
     
     def run_mass_function_sampling(self):
         '''
-        Creates an instance of MF_Sampler class
+        Creates an instance of MF_Sampler class.
         '''
         self.load_mixtures()
         self.mf_folder = self.output_folder+'/mass_function/'
@@ -455,7 +474,21 @@ class SE_Sampler:
         
     def initial_state(self, samples):
         '''
-        Create initial state
+        Create initial state -  a dictionary that stores a number of useful variables
+        
+        Arguments:
+            :np.ndarray samples: transformed samples
+        
+        Returns:
+            :dict: new state. Entries are:
+                :list 'cluster_ids_':    list of active cluster labels
+                :np.ndarray 'data_':     transformed samples
+                :int 'num_clusters_':    number of active clusters
+                :double 'alpha_':        actual value of concentration parameter
+                :int 'Ntot':             total number of samples
+                :dict 'hyperparameters': parameters of the hyperpriors
+                :dict 'suffstats':       mean, variance and number of samples of each active cluster
+                :list 'assignment':      list of cluster assignments (one for each sample)
         '''
         assign = [a%int(self.icn) for a in range(len(samples))]
         cluster_ids = list(np.arange(int(np.max(assign)+1)))
@@ -473,13 +506,18 @@ class SE_Sampler:
                 "mu": self.mu
                 },
             'suffstats': {cid: None for cid in cluster_ids},
-            'assignment': assign,
-            'pi': {cid: self.alpha0 / self.icn for cid in cluster_ids},
+            'assignment': assign
             }
         self.update_suffstats(state)
         return state
     
     def update_suffstats(self, state):
+        '''
+        Updates sufficient statistics for each cluster
+        
+        Arguments:
+            :dict state: the current state
+        '''
         for cluster_id, N in Counter(state['assignment']).items():
             points_in_cluster = [x for x, cid in zip(state['data_'], state['assignment']) if cid == cluster_id]
             mean = np.array(points_in_cluster).mean()
@@ -489,7 +527,15 @@ class SE_Sampler:
     
     def log_predictive_likelihood(self, data_id, cluster_id, state):
         '''
-        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster
+        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster - Eq. (2.30)
+        
+        Arguments:
+            :int data_id:    index of the considered sample
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
         '''
         if cluster_id == "new":
             ss = self.SuffStat(0,0,0)
@@ -516,12 +562,32 @@ class SE_Sampler:
         return logL
 
     def add_datapoint_to_suffstats(self, x, ss):
+        '''
+        Updates single cluster sufficient statistics after sample assignment
+        
+        Arguments:
+            :double x:                 posterior sample
+            :SuffStat (NamedTuple) ss: old sufficient statistics
+        
+        Returns:
+            :SuffStat: new sufficient statistics
+        '''
         mean = (ss.mean*(ss.N)+x)/(ss.N+1)
         var  = (ss.N*(ss.var + ss.mean**2) + x**2)/(ss.N+1) - mean**2
         return self.SuffStat(mean, var, ss.N+1)
 
 
     def remove_datapoint_from_suffstats(self, x, ss):
+        '''
+        Updates single cluster sufficient statistics after sample removal
+        
+        Arguments:
+            :double x:                 posterior sample
+            :SuffStat (NamedTuple) ss: old sufficient statistics
+        
+        Returns:
+            :SuffStat: new sufficient statistics
+        '''
         if ss.N == 1:
             return(self.SuffStat(0,0,0))
         mean = (ss.mean*(ss.N)-x)/(ss.N-1)
@@ -531,7 +597,14 @@ class SE_Sampler:
     def cluster_assignment_distribution(self, data_id, state):
         """
         Compute the marginal distribution of cluster assignment
-        for each cluster.
+        for each cluster. Eq. (2.39)
+        
+        Arguments:
+            :int data_id: index of the sample
+            :dict state:  current state
+        
+        Returns:
+            :dict: p_i for each cluster
         """
         scores = {}
         cluster_ids = list(state['suffstats'].keys()) + ['new']
