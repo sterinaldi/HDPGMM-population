@@ -1083,7 +1083,7 @@ class MF_Sampler():
         n = len(events)
         events.append(self.posterior_draws[data_id])
         logL_D = state['logL_D'][cluster_id] #denominator
-        logL_N = self.log_numerical_predictive(np.array(events), self.t_min, self.t_max, self.sigma_min, self.sigma_max) #numerator
+        logL_N = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max) #numerator
         return logL_N - logL_D, logL_N
 
     def log_numerical_predictive(self, events, t_min, t_max, sigma_min, sigma_max):
@@ -1091,16 +1091,16 @@ class MF_Sampler():
         Computes integral over cluster parameters (mean and std) in Eq. (2.39)
         Normalization constant is required to avoid underflow while working with a high number of events.
         Arguments:
-            :np.ndarray events: single event posterior distributions associated with the cluster
-            :double t_min:      lower bound of mean parameter uniform prior
-            :double t_max:      upper bound of mean parameter uniform prior
-            :double sigma_min:  lower bound of sigma parameter uniform prior
-            :double sigma_max:  upper bound of sigma parameter uniform prior
+            :list events:      single event posterior distributions associated with the cluster
+            :double t_min:     lower bound of mean parameter uniform prior
+            :double t_max:     upper bound of mean parameter uniform prior
+            :double sigma_min: lower bound of sigma parameter uniform prior
+            :double sigma_max: upper bound of sigma parameter uniform prior
         Returns:
             :double: log predictive likelihood
         """
         logN_cnst = compute_norm_const(0, 1, events) + np.log(t_max - t_min) + np.log(sigma_max - sigma_min)
-        I, dI = dblquad(integrand, t_min, t_max, gfun = sigma_min, hfun = sigma_max, args = [events, t_min, t_max, sigma_min, sigma_max, logN_cnst])
+        I, dI = dblquad(integrand, t_min, t_max, gfun = sigma_min, hfun = sigma_max, args = [events, logN_cnst])
         return np.log(I) + logN_cnst
     
     def cluster_assignment_distribution(self, data_id, state):
