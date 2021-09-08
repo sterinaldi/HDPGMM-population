@@ -343,7 +343,7 @@ def my_student_t(df, t):
     Returns:
         :float: student_t(df).logpdf(t)
     '''
-    lnB =numba_gammaln(0.5)+ numba_gammaln(0.5*df) - numba_gammaln(0.5 + 0.5*df)
+    lnB = numba_gammaln(0.5)+ numba_gammaln(0.5*df) - numba_gammaln(0.5 + 0.5*df)
     return -0.5*np.log(df*np.pi) - lnB - ((df+1)*0.5)*np.log1p(t*t/df)
     
 @ray.remote
@@ -619,7 +619,14 @@ class SE_Sampler:
     def log_cluster_assign_score(self, cluster_id, state):
         """
         Log-likelihood that a new point generated will
-        be assigned to cluster_id given the current state.
+        be assigned to cluster_id given the current state. Eqs. (2.26) and (2.27)
+        
+        Arguments:
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
         """
         if cluster_id == "new":
             return np.log(state["alpha_"])
@@ -627,6 +634,15 @@ class SE_Sampler:
             return np.log(state['suffstats'][cluster_id].N)
 
     def create_cluster(self, state):
+        '''
+        Creates a new cluster when a sample is assigned to "new".
+        
+        Arguments:
+            :dict state: current state to update
+        
+        Returns:
+            :int: new cluster label
+        '''
         state["num_clusters_"] += 1
         cluster_id = max(state['suffstats'].keys()) + 1
         state['suffstats'][cluster_id] = self.SuffStat(0, 0, 0)
@@ -634,19 +650,39 @@ class SE_Sampler:
         return cluster_id
 
     def destroy_cluster(self, state, cluster_id):
+        """
+        Removes an empty cluster
+        
+        Arguments:
+            :dict state:     current state to update
+            :int cluster_id: label of the target empty cluster
+        """
         state["num_clusters_"] -= 1
         del state['suffstats'][cluster_id]
         state['cluster_ids_'].remove(cluster_id)
         
     def prune_clusters(self,state):
+        """
+        Selects empty cluster(s) and removes them.
+        
+        Arguments:
+            :dict state: current state to update
+        """
         for cid in state['cluster_ids_']:
             if state['suffstats'][cid].N == 0:
                 self.destroy_cluster(state, cid)
 
     def sample_assignment(self, data_id, state):
         """
-        Sample new assignment from marginal distribution.
-        If cluster is "new", create a new cluster.
+        Samples new assignment from marginal distribution.
+        If cluster is "new", creates a new cluster.
+        
+        Arguments:
+            :int data_id: index of the sample to be assigned
+            :dict state:  current state
+        
+        Returns:
+            :int: index of the selected cluster
         """
         scores = self.cluster_assignment_distribution(data_id, state).items()
         labels, scores = zip(*scores)
@@ -656,14 +692,21 @@ class SE_Sampler:
         else:
             return int(cid)
 
-    def update_alpha(self, state, thinning = 100):
+    def update_alpha(self, state, burnin = 100):
         '''
-        Update concentration parameter
+        Updates concentration parameter using a Metropolis-Hastings sampling scheme.
+        
+        Arguments:
+            :dict state: current state
+            :int burnin: MH burnin
+        
+        Returns:
+            :double: new concentration parametere value
         '''
         a_old = state['alpha_']
         n     = state['Ntot']
         K     = len(state['cluster_ids_'])
-        for _ in range(thinning):
+        for _ in range(burnin):
             a_new = a_old + random.RandomState().uniform(-1,1)*0.5
             if a_new > 0:
                 logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
@@ -674,7 +717,10 @@ class SE_Sampler:
 
     def gibbs_step(self, state):
         """
-        Collapsed Gibbs sampler for Dirichlet Process Gaussian Mixture Model
+        Computes a single Gibbs step (updates all the sample assignments using conditional probabilities)
+        
+        Arguments:
+            :dict state: current state to update
         """
         # alpha sampling
         state['alpha_'] = self.update_alpha(state)
@@ -690,7 +736,10 @@ class SE_Sampler:
     
     def sample_mixture_parameters(self, state):
         '''
-        Draws a mixture sample
+        Draws a mixture sample (weights, means and variances) using conditional probabilities. Eqs. (3.2) and (3.3)
+        
+        Arguments:
+            :dict state: current state
         '''
         ss = state['suffstats']
         alpha = [ss[cid].N + state['alpha_'] / state['num_clusters_'] for cid in state['cluster_ids_']]
@@ -711,6 +760,9 @@ class SE_Sampler:
         self.mixture_samples.append(components)
     
     def run_sampling(self):
+        """
+        Runs the sampling algorithm - Listing 1
+        """
         state = self.initial_state(self.mass_samples)
         for i in range(self.burnin):
             if self.verbose:
@@ -817,6 +869,15 @@ class SE_Sampler:
         fig.savefig(self.alpha_folder+'/alpha_{0}.pdf'.format(self.e_ID), bbox_inches='tight')
     
     def make_folders(self):
+        """
+        Creates directories.
+        WARNING: While running for the very first time a hierarchical inference with more than one parallel single-event analysis, this function could lead to an error:
+        
+        (FileExistsError: [Errno 17] File exists: 'filename').
+        
+        This is due to the fact that two different samplers are trying to create one of the shared folders at the same time.
+        To cure this, just re-run the inference with the same output path.
+        """
         self.output_events = self.output_folder + '/reconstructed_events/'
         if not os.path.exists(self.output_events):
             os.mkdir(self.output_events)
@@ -845,7 +906,7 @@ class SE_Sampler:
     
     def run(self):
         """
-        Runs sampler, saves samples and produces output plots.
+        Runs the sampler, saves samples and produces output plots.
         """
         self.make_folders()
         self.run_sampling()
