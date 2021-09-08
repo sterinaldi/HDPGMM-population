@@ -57,16 +57,17 @@ rcParams["grid.alpha"] = 0.6
 Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
 """
 
-# natural sorting.
-# list.sort(key = natural_keys)
-
 def sort_matrix(a, axis = -1):
     '''
     2d matrix sorting algorithm.
     
     Arguments:
         :np.ndarray a: the matrix to be sorted
-        :int axis:     t
+        :int axis:     sorting axis
+        
+    Returns:
+        :np.ndarray: first sorted column
+        :np.ndarray: second sorted column
     '''
     mat = np.array([[m, f] for m, f in zip(a[0], a[1])])
     keys = np.array([x for x in mat[:,axis]])
@@ -91,7 +92,8 @@ def atoi(text):
 
 def natural_keys(text):
     '''
-    alist.sort(key=natural_keys) sorts in human order
+    natural sorting.
+    list.sort(key=natural_keys) sorts in human order
     http://nedbatchelder.com/blog/200712/human_sorting.html
     (See Toothy's implementation in the comments)
     '''
@@ -600,7 +602,7 @@ class SE_Sampler:
         for each cluster. Eq. (2.39)
         
         Arguments:
-            :int data_id: index of the sample
+            :int data_id: sample index
             :dict state:  current state
         
         Returns:
@@ -794,7 +796,6 @@ class SE_Sampler:
         """
         Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
         """
-        
         lower_bound = max([self.m_min-1, self.glob_m_min])
         upper_bound = min([self.m_max+1, self.glob_m_max])
         app  = np.linspace(lower_bound, upper_bound, 1000)
@@ -1024,7 +1025,23 @@ class MF_Sampler():
     
     def initial_state(self):
         '''
-        Creates initial state
+        Create initial state -  a dictionary that stores a number of useful variables
+        
+        Arguments:
+            :np.ndarray samples: transformed samples
+        
+        Returns:
+            :dict: new state. Entries are:
+                :list 'cluster_ids_':    list of active cluster labels
+                :np.ndarray 'data_':     transformed samples
+                :int 'num_clusters_':    number of active clusters
+                :double 'alpha_':        actual value of concentration parameter
+                :int 'Ntot':             total number of samples
+                :dict 'hyperparameters': parameters of the hyperpriors
+                :dict 'suffstats':       mean, variance and number of samples of each active cluster
+                :list 'assignment':      list of cluster assignments (one for each sample)
+                :dict 'ev_in_cl':        list of sample indices assigned to each cluster
+                :dict logL_D:            log-Likelihood for samples in cluster
         '''
         self.update_draws()
         assign = [int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))]
@@ -1036,7 +1053,6 @@ class MF_Sampler():
             'alpha_': self.alpha0,
             'Ntot': len(self.posterior_draws),
             'assignment': assign,
-            'pi': {cid: self.alpha0 / self.icn for cid in cluster_ids},
             'ev_in_cl': {cid: list(np.where(np.array(assign) == cid)[0]) for cid in cluster_ids},
             'logL_D': {cid: None for cid in cluster_ids}
             }
@@ -1049,7 +1065,15 @@ class MF_Sampler():
     
     def log_predictive_likelihood(self, data_id, cluster_id, state):
         '''
-        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster
+        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster - part of Eq. (2.39)
+        
+        Arguments:
+            :int data_id:    index of the considered sample
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
         '''
         if cluster_id == "new":
             events = []
@@ -1059,10 +1083,22 @@ class MF_Sampler():
         n = len(events)
         events.append(self.posterior_draws[data_id])
         logL_D = state['logL_D'][cluster_id] #denominator
-        logL_N = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max) #numerator
+        logL_N = self.log_numerical_predictive(np.array(events), self.t_min, self.t_max, self.sigma_min, self.sigma_max) #numerator
         return logL_N - logL_D, logL_N
 
     def log_numerical_predictive(self, events, t_min, t_max, sigma_min, sigma_max):
+        """"
+        Computes integral over cluster parameters (mean and std) in Eq. (2.39)
+        Normalization constant is required to avoid underflow while working with a high number of events.
+        Arguments:
+            :np.ndarray events: single event posterior distributions associated with the cluster
+            :double t_min:      lower bound of mean parameter uniform prior
+            :double t_max:      upper bound of mean parameter uniform prior
+            :double sigma_min:  lower bound of sigma parameter uniform prior
+            :double sigma_max:  upper bound of sigma parameter uniform prior
+        Returns:
+            :double: log predictive likelihood
+        """
         logN_cnst = compute_norm_const(0, 1, events) + np.log(t_max - t_min) + np.log(sigma_max - sigma_min)
         I, dI = dblquad(integrand, t_min, t_max, gfun = sigma_min, hfun = sigma_max, args = [events, t_min, t_max, sigma_min, sigma_max, logN_cnst])
         return np.log(I) + logN_cnst
@@ -1070,7 +1106,14 @@ class MF_Sampler():
     def cluster_assignment_distribution(self, data_id, state):
         """
         Compute the marginal distribution of cluster assignment
-        for each cluster.
+        for each cluster. Eq. (2.39)
+        
+        Arguments:
+            :int data_id: sample index
+            :dict state:  current state
+        
+        Returns:
+            :dict: p_i for each cluster
         """
         cluster_ids = list(state['ev_in_cl'].keys()) + ['new']
         # can't pickle injected density
@@ -1086,6 +1129,21 @@ class MF_Sampler():
         return scores
         
     def compute_score(self, args):
+        """
+        Wrapper for log_predictive_likelihood and log_cluster_assign_score
+        (parallelized with Ray)
+        
+        Arguments:
+            :list args: list of arguments. Contains:
+                args[0]: sample index
+                args[1]: cluster index
+                args[2]: current state
+        Returns:
+            :list: list of computed values. Entries are:
+                ret[0]: cluster index
+                ret[1]: p_i for the considered cluster
+                ret[2]: log Likelihood
+        """
         data_id = args[0]
         cid     = args[1]
         state   = args[2]
@@ -1098,7 +1156,14 @@ class MF_Sampler():
     def log_cluster_assign_score(self, cluster_id, state):
         """
         Log-likelihood that a new point generated will
-        be assigned to cluster_id given the current state.
+        be assigned to cluster_id given the current state. Eqs. (2.26) and (2.27)
+        
+        Arguments:
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
         """
         if cluster_id == "new":
             return np.log(state["alpha_"])
@@ -1108,6 +1173,15 @@ class MF_Sampler():
             return np.log(len(state['ev_in_cl'][cluster_id]))
 
     def create_cluster(self, state):
+        '''
+        Creates a new cluster when a sample is assigned to "new".
+        
+        Arguments:
+            :dict state: current state to update
+        
+        Returns:
+            :int: new cluster label
+        '''
         state["num_clusters_"] += 1
         cluster_id = max(state['cluster_ids_']) + 1
         state['cluster_ids_'].append(cluster_id)
@@ -1115,19 +1189,39 @@ class MF_Sampler():
         return cluster_id
 
     def destroy_cluster(self, state, cluster_id):
+        """
+        Removes an empty cluster
+        
+        Arguments:
+            :dict state:     current state to update
+            :int cluster_id: label of the target empty cluster
+        """
         state["num_clusters_"] -= 1
         state['cluster_ids_'].remove(cluster_id)
         state['ev_in_cl'].pop(cluster_id)
         
     def prune_clusters(self,state):
+        """
+        Selects empty cluster(s) and removes them.
+        
+        Arguments:
+            :dict state: current state to update
+        """
         for cid in state['cluster_ids_']:
             if len(state['ev_in_cl'][cid]) == 0:
                 self.destroy_cluster(state, cid)
 
     def sample_assignment(self, data_id, state):
         """
-        Sample new assignment from marginal distribution.
-        If cluster is "new", create a new cluster.
+        Samples new assignment from marginal distribution.
+        If cluster is "new", creates a new cluster.
+        
+        Arguments:
+            :int data_id: index of the sample to be assigned
+            :dict state:  current state
+        
+        Returns:
+            :int: index of the selected cluster
         """
         self.numerators = {}
         scores = self.cluster_assignment_distribution(data_id, state).items()
@@ -1142,28 +1236,55 @@ class MF_Sampler():
             return int(cid)
 
     def update_draws(self):
+        """
+        Draws a set of N single event posterior samples, one for each event, from the pools.
+        Marginalisation over single event posterior distribution parameters - Eq. (2.39) - is carried   out drawing a new posterior distribution from the pool for every Gibbs
+        """
         draws = []
         for posterior_samples in self.posterior_functions_events:
             draws.append(posterior_samples[random.randint(len(posterior_samples))])
         self.posterior_draws = draws
     
     def drop_from_cluster(self, state, data_id, cid):
+        """
+        Removes a sample from a cluster.
+        
+        Arguments:
+            :dict state: current state
+            :data_id:    sample index
+            :cid:        cluster index
+        """
         state['ev_in_cl'][cid].remove(data_id)
         events = [self.posterior_draws[i] for i in state['ev_in_cl'][cid]]
         n = len(events)
         state['logL_D'][cid] = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max)
 
     def add_to_cluster(self, state, data_id, cid):
+        """
+        Adds a sample to a cluster.
+        
+        Arguments:
+            :dict state: current state
+            :data_id:    sample index
+            :cid:        cluster index
+        """
         state['ev_in_cl'][cid].append(data_id)
 
-    def update_alpha(self, state, trimming = 100):
+    def update_alpha(self, state, burnin = 100):
         '''
-        Updetes concentration parameter
+        Updates concentration parameter using a Metropolis-Hastings sampling scheme.
+        
+        Arguments:
+            :dict state: current state
+            :int burnin: MH burnin
+        
+        Returns:
+            :double: new concentration parametere value
         '''
         a_old = state['alpha_']
         n     = state['Ntot']
         K     = len(state['cluster_ids_'])
-        for _ in range(trimming):
+        for _ in range(burnin):
             a_new = a_old + random.RandomState().uniform(-1,1)*0.5#.gamma(1)
             if a_new > 0:
                 logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
@@ -1174,7 +1295,10 @@ class MF_Sampler():
     
     def gibbs_step(self, state):
         """
-        Collapsed Gibbs sampler for Dirichlet Process Gaussian Mixture Model
+        Computes a single Gibbs step (updates all the sample assignments using conditional probabilities)
+        
+        Arguments:
+            :dict state: current state to update
         """
         self.update_draws()
         state['alpha_'] = self.update_alpha(state)
@@ -1189,6 +1313,12 @@ class MF_Sampler():
         self.n_clusters.append(len(state['cluster_ids_']))
     
     def sample_mixture_parameters(self, state):
+        '''
+        Draws a mixture sample (weights, means and variances) using conditional probabilities. Eq. (3.7)
+        
+        Arguments:
+            :dict state: current state
+        '''
         alpha = [len(state['ev_in_cl'][cid]) + state['alpha_'] / state['num_clusters_'] for cid in state['cluster_ids_']]
         weights = stats.dirichlet(alpha).rvs(size=1).flatten()
         components = {}
@@ -1317,7 +1447,9 @@ class MF_Sampler():
         return
 
     def checkpoint(self):
-
+        """
+        Saves to file recent draws
+        """
         try:
             picklefile = open(self.output_events + '/checkpoint.pkl', 'rb')
             samps = pickle.load(picklefile)
@@ -1342,6 +1474,9 @@ class MF_Sampler():
         picklefile.close()
 
     def run_sampling(self):
+        """
+        Runs the sampling algorithm - Listing 2
+        """
         self.state = self.initial_state()
         for i in range(self.burnin):
             print('\rBURN-IN MF: {0}/{1}'.format(i+1, self.burnin), end = '')
