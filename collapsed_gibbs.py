@@ -1353,7 +1353,7 @@ class MF_Sampler():
 
     def postprocess(self):
         """
-        Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
+        Plots the inferred distribution and saves draws.
         """
         # mass values
         app  = np.linspace(self.m_min, self.m_max_plot, 1000)
@@ -1453,12 +1453,14 @@ class MF_Sampler():
         ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))))
         fig.savefig(self.output_events+'/gamma_mf.pdf', bbox_inches='tight')
         
-        # if simulation, computes entropy between median and injected density
+        # if simulation, computes Jensen-Shannon distance
         if self.injected_density is not None:
-            inj = np.array([self.injected_density(ai)/norm for ai in app])
-            ent = js(p[50], inj)
-            print('Jensen-Shannon distance: {0} nats'.format(ent))
-            np.savetxt(self.output_events + '/relative_entropy.txt', np.array([ent]))
+            ent = [js(np.exp(s(app)), density) for s in log_draws_interp]
+            JSD = {}
+            for perc in percentiles:
+                JSD[perc] = np.percentile(ent, perc, axis = 0)
+            print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]))
+            np.savetxt(output + '/JSD.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
         
     
     def run(self):
