@@ -55,6 +55,8 @@ rcParams["grid.alpha"] = 0.6
 
 """
 Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
+Paper: https://arxiv.org/pdf/xxxx.xxxxx.pdf
+An excellent handbook on conjugate priors: https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf
 """
 
 def sort_matrix(a, axis = -1):
@@ -80,7 +82,7 @@ def sort_matrix(a, axis = -1):
 
 def atoi(text):
     '''
-    Converts string to integers (if number).
+    Converts string to integers (if digit).
     
     Arguments:
         :str text: string to be converted
@@ -255,7 +257,6 @@ class CGSampler:
         for n in range(int(len(self.events)/self.n_parallel_threads)+1):
             tasks = self.initialise_samplers(n*self.n_parallel_threads)
             pool = ActorPool(tasks)
-            #guardare ray.wait
             for s in pool.map(lambda a, v: a.run.remote(), range(len(tasks))):
                 self.posterior_functions_events.append(s)
                 i += 1
@@ -796,17 +797,20 @@ class SE_Sampler:
         """
         Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
         """
+        # mass values
         lower_bound = max([self.m_min-1, self.glob_m_min])
         upper_bound = min([self.m_max+1, self.glob_m_max])
         app  = np.linspace(lower_bound, upper_bound, 1000)
         da   = app[1]-app[0]
         percentiles = [5,16, 50, 84, 95]
-        
         p = {}
         
+        # plots samples histogram
         fig = plt.figure()
         ax  = fig.add_subplot(111)
         ax.hist(self.initial_samples, bins = int(np.sqrt(len(self.initial_samples))), histtype = 'step', density = True, label = r"\textsc{Mass samples}")
+        
+        # evaluates log probabilities in mass space
         prob = []
         for ai in app:
             a = self.transform(ai)
@@ -816,37 +820,42 @@ class SE_Sampler:
         for pr in np.array(prob).T:
             log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
         
+        # saves interpolant functions into pickle file
         picklefile = open(self.output_posteriors + '/posterior_functions_{0}.pkl'.format(self.e_ID), 'wb')
         pickle.dump(log_draws_interp, picklefile)
         picklefile.close()
         
+        # computes percentiles
         for perc in percentiles:
             p[perc] = np.percentile(prob, perc, axis = 1)
         normalisation = logsumexp(p[50] + np.log(da))
         for perc in percentiles:
             p[perc] = p[perc] - normalisation
-            
+        
+        # Saves median and CR
         names = ['m'] + [str(perc) for perc in percentiles]
         np.savetxt(self.output_recprob + '/log_rec_prob_{0}.txt'.format(self.e_ID), np.array([app, p[5], p[16], p[50], p[84], p[95]]).T, header = ' '.join(names))
+        
         for perc in percentiles:
             p[perc] = np.exp(np.percentile(prob, perc, axis = 1))
         for perc in percentiles:
             p[perc] = p[perc]/np.exp(normalisation)
-            
         prob = np.array(prob)
         
+        # Computes entropy between samples and median
         ent = []
-        
         for i in range(np.shape(prob)[1]):
             sample = np.exp(prob[:,i])
             ent.append(js(sample,p[50]))
         mean_ent = np.mean(ent)
         np.savetxt(self.output_entropy + '/KLdiv_{0}.txt'.format(self.e_ID), np.array(ent), header = 'mean JS distance = {0}'.format(mean_ent))
         
+        # saves mixture samples into pickle file
         picklefile = open(self.output_pickle + '/posterior_functions_{0}.pkl'.format(self.e_ID), 'wb')
         pickle.dump(self.mixture_samples, picklefile)
         picklefile.close()
         
+        # plots median and CR of reconstructed probability density
         self.sample_probs = prob
         self.median_mf = np.array(p[50])
         
@@ -859,11 +868,14 @@ class SE_Sampler:
         ax.grid(True,dashes=(1,3))
         ax.legend(loc=0,frameon=False,fontsize=10)
         plt.savefig(self.output_pltevents + '/{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
+        
+        # plots number of clusters
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(np.arange(1,len(self.n_clusters)+1), self.n_clusters, ls = '--', marker = ',', linewidth = 0.5)
         fig.savefig(self.output_n_clusters+'n_clusters_{0}.pdf'.format(self.e_ID), bbox_inches='tight')
         
+        # plots concentration parameter
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))))
@@ -1285,7 +1297,7 @@ class MF_Sampler():
         n     = state['Ntot']
         K     = len(state['cluster_ids_'])
         for _ in range(burnin):
-            a_new = a_old + random.RandomState().uniform(-1,1)*0.5#.gamma(1)
+            a_new = a_old + random.RandomState().uniform(-1,1)*0.5
             if a_new > 0:
                 logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
                 logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
@@ -1343,19 +1355,21 @@ class MF_Sampler():
         """
         Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
         """
-        print(self.m_min, self.m_max_plot)
+        # mass values
         app  = np.linspace(self.m_min, self.m_max_plot, 1000)
         da = app[1]-app[0]
         percentiles = [50, 5,16, 84, 95]
-        
         p = {}
-        
         fig = plt.figure()
         fig.suptitle('Observed mass function')
         ax  = fig.add_subplot(111)
+        
+        # if provided (simulation) plots true masses histogram
         if self.true_masses is not None:
             truths = np.genfromtxt(self.true_masses, names = True)
             ax.hist(truths['m'], bins = int(np.sqrt(len(truths['m']))), histtype = 'step', density = True, label = r"\textsc{True masses}")
+        
+        # evaluates log probabilities in mass space
         prob = []
         for ai in app:
             a = self.transform(ai)
@@ -1365,6 +1379,7 @@ class MF_Sampler():
         for pr in np.array(prob).T:
             log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
         
+        # Saves interpolant functions into pickle file
         name = self.output_events + '/posterior_functions_mf_'
         extension ='.pkl'
         x = 0
@@ -1376,24 +1391,30 @@ class MF_Sampler():
         pickle.dump(log_draws_interp, picklefile)
         picklefile.close()
         
+        # computes percentiles
         for perc in percentiles:
             p[perc] = np.percentile(prob, perc, axis = 1)
         normalisation = np.sum(np.exp(p[50])*da)
         for perc in percentiles:
             p[perc] = p[perc] - np.log(normalisation)
-            
         self.sample_probs = prob
+            
+        #saves median and CR
         self.median_mf = np.array(p[50])
         names = ['m'] + [str(perc) for perc in percentiles]
         np.savetxt(self.output_events + '/log_rec_obs_prob_mf.txt', np.array([app, p[50], p[5], p[16], p[84], p[95]]).T, header = ' '.join(names))
+        
         for perc in percentiles:
             p[perc] = np.exp(np.percentile(prob, perc, axis = 1))
         for perc in percentiles:
             p[perc] = p[perc]/normalisation
         
+        # plots median and CR of reconstructed probability density
         ax.fill_between(app, p[95], p[5], color = 'mediumturquoise', alpha = 0.5)
         ax.fill_between(app, p[84], p[16], color = 'darkturquoise', alpha = 0.5)
         ax.plot(app, p[50], marker = '', color = 'steelblue', label = r"\textsc{Reconstructed}", zorder = 100)
+        
+        # if simulation, plots true probability density
         if self.injected_density is not None:
             norm = np.sum([self.injected_density(a)*(app[1]-app[0]) for a in app])
             density = np.array([self.injected_density(a)/norm for a in app])
@@ -1408,6 +1429,7 @@ class MF_Sampler():
         ax.set_ylim(np.min(p[50]))
         plt.savefig(self.output_events + '/log_obs_mass_function.pdf', bbox_inches = 'tight')
         
+        # saves mixture samples into pickle file
         name = self.output_events + '/posterior_mixtures_mf_'
         extension ='.pkl'
         x = 0
@@ -1419,26 +1441,30 @@ class MF_Sampler():
         pickle.dump(self.mixture_samples, picklefile)
         picklefile.close()
         
+        # plots number of clusters
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(np.arange(1,len(self.n_clusters)+1), self.n_clusters, ls = '--', marker = ',', linewidth = 0.5)
         fig.savefig(self.output_events+'n_clusters_mf.pdf', bbox_inches='tight')
+        
+        # plots concentration parameter
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))))
         fig.savefig(self.output_events+'/gamma_mf.pdf', bbox_inches='tight')
-        inj = np.array([self.injected_density(ai)/norm for ai in app])
-        ent = js(p[50], inj)
-        print('Jensen-Shannon distance: {0} nats'.format(ent))
-        np.savetxt(self.output_events + '/relative_entropy.txt', np.array([ent]))
+        
+        # if simulation, computes entropy between median and injected density
+        if self.injected_density is not None:
+            inj = np.array([self.injected_density(ai)/norm for ai in app])
+            ent = js(p[50], inj)
+            print('Jensen-Shannon distance: {0} nats'.format(ent))
+            np.savetxt(self.output_events + '/relative_entropy.txt', np.array([ent]))
         
     
     def run(self):
         """
         Runs sampler, saves samples and produces output plots.
         """
-
-        # reconstructed events
         self.output_events = self.output_folder
         if not os.path.exists(self.output_events):
             os.mkdir(self.output_events)
@@ -1457,6 +1483,7 @@ class MF_Sampler():
         except:
             samps = []
         
+        # evaluates probabilities in mass space
         app  = np.linspace(self.m_min, self.m_max_plot, 1000)
         da = app[1]-app[0]
         prob = []
@@ -1468,6 +1495,7 @@ class MF_Sampler():
         for pr in np.array(prob).T:
             log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
         
+        # saves new samples
         samps = samps + log_draws_interp
         picklefile = open(self.output_events + '/checkpoint.pkl', 'wb')
         pickle.dump(samps, picklefile)
