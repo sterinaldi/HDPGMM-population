@@ -2,50 +2,75 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import re
-import warnings
+import pickle
 
 from collections import namedtuple, Counter
 from numpy import random
-from functools import reduce
 
 from scipy import stats
-from scipy.stats import t as student_t
 from scipy.stats import entropy, gamma
 from scipy.spatial.distance import jensenshannon as js
-from scipy.special import logsumexp, betaln, gammaln
+from scipy.special import logsumexp, betaln, gammaln, erfinv
 from scipy.interpolate import interp1d
 from scipy.integrate import dblquad
 
 from sampler_component_pars import sample_point
 
 from time import perf_counter
-from itertools import product
 
-from numba import jit, njit
-from numba import prange
 import ray
 from ray.util import ActorPool
-#from multiprocessing import Pool
 from ray.util.multiprocessing import Pool
 
-# See https://pythonspeed.com/articles/python-multiprocessing/
-from multiprocessing import get_context
+from utils import integrand, compute_norm_const, log_norm
 
-from utils import integrand
+from matplotlib import rcParams
+from numba import jit, njit
+from numba.extending import get_cython_function_address
+import ctypes
 
-import pickle
+_PTR = ctypes.POINTER
+_dble = ctypes.c_double
+_ptr_dble = _PTR(_dble)
 
+addr = get_cython_function_address("scipy.special.cython_special", "gammaln")
+functype = ctypes.CFUNCTYPE(_dble, _dble)
+gammaln_float64 = functype(addr)
+
+@njit
+def numba_gammaln(x):
+  return gammaln_float64(x)
+
+rcParams["text.usetex"] = True
+rcParams["font.serif"] = "Computer Modern"
+rcParams["font.family"] = "Serif"
+rcParams["xtick.labelsize"]=14
+rcParams["ytick.labelsize"]=14
+rcParams["xtick.direction"]="in"
+rcParams["ytick.direction"]="in"
+rcParams["legend.fontsize"]=15
+rcParams["axes.labelsize"]=16
+rcParams["axes.grid"] = True
+rcParams["grid.alpha"] = 0.6
 
 """
 Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
-Modified (marginalisation)
-Interesting answer: https://stats.stackexchange.com/questions/330488/estimate-the-variance-of-gaussian-distribution-from-noisy-sample
+Paper: https://arxiv.org/pdf/xxxx.xxxxx.pdf
+An excellent handbook on conjugate priors: https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf
 """
 
-# natural sorting.
-# list.sort(key = natural_keys)
-
 def sort_matrix(a, axis = -1):
+    '''
+    2d matrix sorting algorithm.
+    
+    Arguments:
+        :np.ndarray a: the matrix to be sorted
+        :int axis:     sorting axis
+        
+    Returns:
+        :np.ndarray: first sorted column
+        :np.ndarray: second sorted column
+    '''
     mat = np.array([[m, f] for m, f in zip(a[0], a[1])])
     keys = np.array([x for x in mat[:,axis]])
     sorted_keys = np.copy(keys)
@@ -55,28 +80,63 @@ def sort_matrix(a, axis = -1):
     return sorted_mat[:,0], sorted_mat[:,1]
     
 
-
 def atoi(text):
+    '''
+    Converts string to integers (if digit).
+    
+    Arguments:
+        :str text: string to be converted
+    
+    Returns:
+        :int or str: the converted string
+    '''
     return int(text) if text.isdigit() else text
 
 def natural_keys(text):
     '''
-    alist.sort(key=natural_keys) sorts in human order
+    natural sorting.
+    list.sort(key=natural_keys) sorts in human order
     http://nedbatchelder.com/blog/200712/human_sorting.html
     (See Toothy's implementation in the comments)
     '''
     return [ atoi(c) for c in re.split(r'(\d+)', text) ]
 
 class CGSampler:
-                
+    '''
+    Class to analyse a set of mass posterior samples and reconstruct the mass distribution.
+    WARNING: despite being suitable to solve many different inference problems, thia algorithm was implemented to infer the black hole mass function. Both variable names and documentation are written accordingly.
+    
+    Arguments:
+        :iterable events:               list of single-event posterior samples
+        :list samp_settings:            settings for mass function chain (burnin, number of draws and thinning)
+        :list samp_settings_ev:         settings for single event chain (see above)
+        :float alpha0:                  initial guess for single-event concentration parameter
+        :float gamma0:                  initial guess for mass function concentration parameter
+        :list hyperpriors_ev:           hyperpriors for single-event NIG prior
+        :float m_min:                   lower bound of mass prior
+        :float m_max:                   upper bound of mass prior
+        :bool verbose:                  verbosity of single-event analysis
+        :str output_folder:             output folder
+        :double initial_cluster_number: initial guess for the number of active clusters
+        :bool process_events:           runs single-event analysis
+        :int n_parallel_threads:        number of parallel actors to spawn
+        :function injected_density:     python function with simulated density
+        :iterable true_masses:          draws from injected_density around which are drawn simulated samples
+        :iterable names:                str containing names to be given to single-event output files (e.g. ['GW150814', 'GW170817'])
+    
+    Returns:
+        :CGSampler: instance of CGSampler class
+    
+    Example:
+        sampler = CGSampler(*args)
+        sampler.run()
+    '''
     def __init__(self, events,
                        samp_settings, # burnin, draws, step (list)
                        samp_settings_ev = None,
-                       mass_chain_settings = [100,10], # burnin masses, step masses
                        alpha0 = 1,
                        gamma0 = 1,
-                       hyperpars_ev = [1,3,1/4.],
-                       hyperpars = [1,10,1/4.], # a, b, V
+                       hyperpriors_ev = [1,1/4.], #a, V
                        m_min = 5,
                        m_max = 70,
                        verbose = True,
@@ -86,51 +146,38 @@ class CGSampler:
                        n_parallel_threads = 8,
                        injected_density = None,
                        true_masses = None,
-                       diagnostic = False,
-                       sigma_max  = 4,
-                       sigma_max_ev = None,
                        names = None,
-                       autocorrelation = False,
-                       autocorrelation_ev = False
                        ):
         
-        self.events = events
         self.burnin_mf, self.n_draws_mf, self.step_mf = samp_settings
         if samp_settings_ev is not None:
             self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings_ev
         else:
             self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings
-        self.burnin_masses, self.step_masses = mass_chain_settings
-
+        self.events = events
         sample_min = np.min([np.min(a) for a in self.events])
         sample_max = np.max([np.max(a) for a in self.events])
         self.m_min   = min([m_min, sample_min])
-        if self.m_min < 0.01:
-            self.m_min = 0.01
         self.m_max   = max([m_max, sample_max])
         self.m_max_plot = m_max
+        # probit
+        self.transformed_events = [self.transform(ev) for ev in events]
+        self.t_min = self.transform(self.m_min)
+        self.t_max = self.transform(self.m_max)
         # DP
         self.alpha0 = alpha0
         self.gamma0 = gamma0
         # student-t
-        self.a_mf, self.b_mf, self.V_mf = hyperpars
-        if hyperpars_ev is not None:
-            self.a_ev, self.b_ev, self.V_ev = hyperpars_ev
+        if hyperpriors_ev is not None:
+            self.a_ev, self.V_ev = hyperpriors_ev
         else:
-            self.a_ev, self.b_ev, self.V_ev = hyperpars
-        self.sigma_max = sigma_max
-        if sigma_max_ev is not None:
-            self.sigma_max_ev = sigma_max_ev
-        else:
-            self.sigma_max_ev = sigma_max
+            self.a_ev, self.V_ev = [1,1/4.]
         # miscellanea
         self.output_folder = output_folder
         self.icn = initial_cluster_number
         self.event_samplers = []
-        self.delta_M = [np.std(e) for e in self.events]
         self.verbose = verbose
         self.process_events = process_events
-        self.diagnostic = diagnostic
         self.n_parallel_threads = n_parallel_threads
         self.injected_density = injected_density
         self.true_masses = true_masses
@@ -139,40 +186,77 @@ class CGSampler:
             self.names = names
         else:
             self.names = [str(i+1) for i in range(len(self.events))]
-        self.autocorrelation = autocorrelation
-        self.autocorrelation_ev = autocorrelation_ev
+            
+    def transform(self, samples):
+        '''
+        Coordinate change into probit space
         
+        Arguments:
+            :float or np.ndarray samples: mass sample(s) to transform
+        Returns:
+            :float or np.ndarray: transformed sample(s)
+        '''
+        if self.m_min > 0:
+            min = self.m_min*0.9999
+        else:
+            min = self.m_min*1.0001
+        if self.m_max > 0:
+            max = self.m_max*1.0001
+        else:
+            max = self.m_max*0.9999
+        cdf_bounds = [min, max]
+        cdf = (samples - cdf_bounds[0])/(cdf_bounds[1]-cdf_bounds[0])
+        new_samples = np.sqrt(2)*erfinv(2*cdf-1)
+        return new_samples
+    
     def initialise_samplers(self, marker):
+        '''
+        Initialises n_parallel_threads instances of SE_Sampler class
+        
+        Arguments:
+            :float marker: index from where to begin with index slicing
+        
+        Returns:
+            :list: list of SE_samplers ready to run
+        '''
         event_samplers = []
-        for i, ev in enumerate(self.events[marker:marker+self.n_parallel_threads]):
-            event_samplers.append(Sampler_SE.remote(
-                                            ev,
+        for i, (ev, t_ev) in enumerate(zip(self.events[marker:marker+self.n_parallel_threads], self.transformed_events[marker:marker+self.n_parallel_threads])):
+            event_samplers.append(SE_Sampler.remote(
+                                            t_ev,
                                             self.names[marker+i],
                                             self.burnin_ev,
                                             self.n_draws_ev,
                                             self.step_ev,
+                                            ev,
                                             self.alpha0,
-                                            self.b_ev,
                                             self.a_ev,
                                             self.V_ev,
-                                            self.m_min,
+                                            np.min(ev),
+                                            np.max(ev),
+                                            np.min(t_ev),
+                                            np.max(t_ev),
                                             self.m_max,
+                                            self.m_min,
                                             self.output_folder,
-                                            False,
+                                            self.verbose,
                                             self.icn,
-                                            self.sigma_max_ev,
-                                            self.autocorrelation_ev
+                                            transformed = True
                                             ))
         return event_samplers
         
     def run_event_sampling(self):
-        ray.init(ignore_reinit_error=True, log_to_driver=False, num_cpus = self.n_parallel_threads)
+        '''
+        Runs all the single-event analysis.
+        '''
+        if self.verbose:
+            ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads)
+        else:
+            ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads, log_to_driver = False)
         i = 0
         self.posterior_functions_events = []
         for n in range(int(len(self.events)/self.n_parallel_threads)+1):
             tasks = self.initialise_samplers(n*self.n_parallel_threads)
             pool = ActorPool(tasks)
-            #guardare ray.wait
             for s in pool.map(lambda a, v: a.run.remote(), range(len(tasks))):
                 self.posterior_functions_events.append(s)
                 i += 1
@@ -181,6 +265,9 @@ class CGSampler:
         return
     
     def load_mixtures(self):
+        '''
+        Loads results from previously analysed events.
+        '''
         print('Loading mixtures...')
         self.posterior_functions_events = []
         prob_files = [self.output_recprob+f for f in os.listdir(self.output_recprob) if f.startswith('posterior_functions')]
@@ -201,34 +288,39 @@ class CGSampler:
         return
     
     def run_mass_function_sampling(self):
+        '''
+        Creates an instance of MF_Sampler class.
+        '''
         self.load_mixtures()
         self.mf_folder = self.output_folder+'/mass_function/'
         if not os.path.exists(self.mf_folder):
             os.mkdir(self.mf_folder)
-            
+        flattened_transf_ev = np.array([x for ev in self.transformed_events for x in ev])
         sampler = MF_Sampler(self.posterior_functions_events,
                        self.burnin_mf,
                        self.n_draws_mf,
                        self.step_mf,
-                       delta_M = self.delta_M,
                        alpha0 = self.gamma0,
                        m_min = self.m_min,
                        m_max = self.m_max,
-                       verbose = self.verbose,
+                       t_min = self.t_min,
+                       t_max = self.t_max,
                        output_folder = self.mf_folder,
                        initial_cluster_number = min([self.icn, len(self.posterior_functions_events)]),
                        injected_density = self.injected_density,
                        true_masses = self.true_masses,
-                       diagnostic = self.diagnostic,
-                       sigma_max = self.sigma_max,
+                       sigma_min = np.std(flattened_transf_ev)/16.,
+                       sigma_max = np.std(flattened_transf_ev)/3.,
                        m_max_plot = self.m_max_plot,
-                       autocorrelation = self.autocorrelation,
-                       n_parallel_threads = self.n_parallel_threads
+                       n_parallel_threads = self.n_parallel_threads,
+                       transformed = True
                        )
-        
         sampler.run()
     
     def run(self):
+        '''
+        Performs full analysis (single-event if required and mass function)
+        '''
         init_time = perf_counter()
         self.display_config()
         if self.process_events:
@@ -244,48 +336,111 @@ class CGSampler:
         
 
 def my_student_t(df, t):
-    b = betaln(0.5, df*0.5)
-    return -0.5*np.log(df*np.pi)-b-((df+1)*0.5)*np.log1p(t*t/df)
+    '''
+    Student-t log pdf
+    
+    Arguments:
+        :float df: degrees of freedom
+        :float t:  variable
+        
+    Returns:
+        :float: student_t(df).logpdf(t)
+    '''
+    lnB = numba_gammaln(0.5)+ numba_gammaln(0.5*df) - numba_gammaln(0.5 + 0.5*df)
+    return -0.5*np.log(df*np.pi) - lnB - ((df+1)*0.5)*np.log1p(t*t/df)
     
 @ray.remote
-class Sampler_SE:
+class SE_Sampler:
+    '''
+    Class to reconstruct a posterior density function given samples.
+    
+    Arguments:
+        :iterable mass_samples:         mass samples (in probit or normal space)
+        :str event_id:                  name to be given to outputs
+        :int burnin:                    number of steps to be discarded
+        :int n_draws:                   number of posterior density draws
+        :int step:                      number of steps between draws
+        :iterable real_masses:          mass samples before coordinate change.
+        :float alpha0:                  initial guess for concentration parameter
+        :float a:                       hyperprior on Gamma shape parameter (for NIG)
+        :float V:                       hyperprior on Normal std (for NIG)
+        :float m_min:                   mass prior lower bound for the specific event
+        :float m_max:                   mass prior upper bound for the specific event
+        :float t_min:                   prior lower bound in probit space
+        :float t_max:                   prior upper bound in probit space
+        :float glob_m_max:              mass function prior upper bound (required for transforming back from probit space)
+        :float glob_m_min:              mass function prior lower bound (required for transforming back from probit space)
+        :str output_folder:             output folder
+        :bool verbose:                  displays analysis progress status
+        :double initial_cluster_number: initial guess for the number of active clusters
+        :double transformed:            mass samples are already in probit space
+    
+    Returns:
+        :SE_Sampler: instance of SE_Sampler class
+    
+    Example:
+        sampler = SE_Sampler(*args)
+        sampler.run()
+    '''
     def __init__(self, mass_samples,
                        event_id,
                        burnin,
                        n_draws,
                        step,
+                       real_masses = None,
                        alpha0 = 1,
-                       b = 5,
                        a = 3,
                        V = 1/4.,
                        m_min = 5,
                        m_max = 50,
+                       t_min = -4,
+                       t_max = 4,
+                       glob_m_max = None,
+                       glob_m_min = None,
                        output_folder = './',
                        verbose = True,
                        initial_cluster_number = 5.,
-                       sigma_max = 5.,
-                       autocorrelation = False
+                       transformed = False
                        ):
         # New seed for each subprocess
         random.RandomState(seed = os.getpid())
-        self.mass_samples  = mass_samples
+        if real_masses is None:
+            self.initial_samples = mass_samples
+        else:
+            self.initial_samples = real_masses
         self.e_ID    = event_id
         self.burnin  = burnin
         self.n_draws = n_draws
         self.step    = step
         self.m_min   = m_min
         self.m_max   = m_max
-        if sigma_max < (max(mass_samples) - min(mass_samples))/3.:
-            self.sigma_max = sigma_max
+        if glob_m_min is None:
+            self.glob_m_min = m_min
         else:
-            self.sigma_max = (max(mass_samples) - min(mass_samples))/3.
+            self.glob_m_min = glob_m_min
+            
+        if glob_m_max is None:
+            self.glob_m_max = m_max
+        else:
+            self.glob_m_max = glob_m_max
+        
+        if transformed:
+            self.mass_samples = mass_samples
+            self.t_max   = t_max
+            self.t_min   = t_min
+        else:
+            self.mass_samples = self.transform(mass_samples)
+            self.t_max        = self.transform(self.m_max)
+            self.t_min        = self.transform(self.m_min)
+            
+        self.sigma_max = np.std(self.mass_samples)/2.
         # DP parameters
         self.alpha0 = alpha0
         # Student-t parameters
-        self.b  = a*(b**2)
+        self.b  = a*(np.std(self.mass_samples)/4.)**2
         self.a  = a
         self.V  = V
-        self.mu = np.mean(mass_samples)
+        self.mu = np.mean(self.mass_samples)
         # Miscellanea
         self.icn    = initial_cluster_number
         self.states = []
@@ -295,10 +450,49 @@ class Sampler_SE:
         self.mixture_samples = []
         self.n_clusters = []
         self.verbose = verbose
-        self.autocorrelation = autocorrelation
         self.alpha_samples = []
         
+    def transform(self, samples):
+        '''
+        Coordinate change into probit space
+        
+        Arguments:
+            :float or np.ndarray samples: mass sample(s) to transform
+        Returns:
+            :float or np.ndarray: transformed sample(s)
+        '''
+        if self.m_min > 0:
+            min = self.glob_m_min*0.9999
+        else:
+            min = self.glob_m_min*1.0001
+        if self.m_max > 0:
+            max = self.glob_m_max*1.0001
+        else:
+            max = self.glob_m_max*0.9999
+        cdf_bounds = [min, max]
+        cdf = (samples - cdf_bounds[0])/(cdf_bounds[1]-cdf_bounds[0])
+        new_samples = np.sqrt(2)*erfinv(2*cdf-1)
+        return new_samples
+    
+        
     def initial_state(self, samples):
+        '''
+        Create initial state -  a dictionary that stores a number of useful variables
+        
+        Arguments:
+            :np.ndarray samples: transformed samples
+        
+        Returns:
+            :dict: new state. Entries are:
+                :list 'cluster_ids_':    list of active cluster labels
+                :np.ndarray 'data_':     transformed samples
+                :int 'num_clusters_':    number of active clusters
+                :double 'alpha_':        actual value of concentration parameter
+                :int 'Ntot':             total number of samples
+                :dict 'hyperparameters': parameters of the hyperpriors
+                :dict 'suffstats':       mean, variance and number of samples of each active cluster
+                :list 'assignment':      list of cluster assignments (one for each sample)
+        '''
         assign = [a%int(self.icn) for a in range(len(samples))]
         cluster_ids = list(np.arange(int(np.max(assign)+1)))
         samp = np.copy(samples)
@@ -315,13 +509,18 @@ class Sampler_SE:
                 "mu": self.mu
                 },
             'suffstats': {cid: None for cid in cluster_ids},
-            'assignment': assign,
-            'pi': {cid: self.alpha0 / self.icn for cid in cluster_ids},
+            'assignment': assign
             }
         self.update_suffstats(state)
         return state
     
     def update_suffstats(self, state):
+        '''
+        Updates sufficient statistics for each cluster
+        
+        Arguments:
+            :dict state: the current state
+        '''
         for cluster_id, N in Counter(state['assignment']).items():
             points_in_cluster = [x for x, cid in zip(state['data_'], state['assignment']) if cid == cluster_id]
             mean = np.array(points_in_cluster).mean()
@@ -330,7 +529,17 @@ class Sampler_SE:
             state['suffstats'][cluster_id] = self.SuffStat(mean, var, M)
     
     def log_predictive_likelihood(self, data_id, cluster_id, state):
+        '''
+        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster - Eq. (2.30)
         
+        Arguments:
+            :int data_id:    index of the considered sample
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
+        '''
         if cluster_id == "new":
             ss = self.SuffStat(0,0,0)
         else:
@@ -351,15 +560,37 @@ class Sampler_SE:
         t_x     = (x - mu_n)/t_sigma
         # Compute logLikelihood
         logL = my_student_t(df = 2*a_n, t = t_x)
+        if not np.isfinite(logL):
+            print(self.e_ID, logL, mean, sigma, x)
         return logL
 
     def add_datapoint_to_suffstats(self, x, ss):
+        '''
+        Updates single cluster sufficient statistics after sample assignment
+        
+        Arguments:
+            :double x:                 posterior sample
+            :SuffStat (NamedTuple) ss: old sufficient statistics
+        
+        Returns:
+            :SuffStat: new sufficient statistics
+        '''
         mean = (ss.mean*(ss.N)+x)/(ss.N+1)
         var  = (ss.N*(ss.var + ss.mean**2) + x**2)/(ss.N+1) - mean**2
         return self.SuffStat(mean, var, ss.N+1)
 
 
     def remove_datapoint_from_suffstats(self, x, ss):
+        '''
+        Updates single cluster sufficient statistics after sample removal
+        
+        Arguments:
+            :double x:                 posterior sample
+            :SuffStat (NamedTuple) ss: old sufficient statistics
+        
+        Returns:
+            :SuffStat: new sufficient statistics
+        '''
         if ss.N == 1:
             return(self.SuffStat(0,0,0))
         mean = (ss.mean*(ss.N)-x)/(ss.N-1)
@@ -369,7 +600,14 @@ class Sampler_SE:
     def cluster_assignment_distribution(self, data_id, state):
         """
         Compute the marginal distribution of cluster assignment
-        for each cluster.
+        for each cluster. Eq. (2.39)
+        
+        Arguments:
+            :int data_id: sample index
+            :dict state:  current state
+        
+        Returns:
+            :dict: p_i for each cluster
         """
         scores = {}
         cluster_ids = list(state['suffstats'].keys()) + ['new']
@@ -382,8 +620,16 @@ class Sampler_SE:
         return scores
 
     def log_cluster_assign_score(self, cluster_id, state):
-        """Log-likelihood that a new point generated will
-        be assigned to cluster_id given the current state.
+        """
+        Log-likelihood that a new point generated will
+        be assigned to cluster_id given the current state. Eqs. (2.26) and (2.27)
+        
+        Arguments:
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
         """
         if cluster_id == "new":
             return np.log(state["alpha_"])
@@ -391,6 +637,15 @@ class Sampler_SE:
             return np.log(state['suffstats'][cluster_id].N)
 
     def create_cluster(self, state):
+        '''
+        Creates a new cluster when a sample is assigned to "new".
+        
+        Arguments:
+            :dict state: current state to update
+        
+        Returns:
+            :int: new cluster label
+        '''
         state["num_clusters_"] += 1
         cluster_id = max(state['suffstats'].keys()) + 1
         state['suffstats'][cluster_id] = self.SuffStat(0, 0, 0)
@@ -398,19 +653,39 @@ class Sampler_SE:
         return cluster_id
 
     def destroy_cluster(self, state, cluster_id):
+        """
+        Removes an empty cluster
+        
+        Arguments:
+            :dict state:     current state to update
+            :int cluster_id: label of the target empty cluster
+        """
         state["num_clusters_"] -= 1
         del state['suffstats'][cluster_id]
         state['cluster_ids_'].remove(cluster_id)
         
     def prune_clusters(self,state):
+        """
+        Selects empty cluster(s) and removes them.
+        
+        Arguments:
+            :dict state: current state to update
+        """
         for cid in state['cluster_ids_']:
             if state['suffstats'][cid].N == 0:
                 self.destroy_cluster(state, cid)
 
     def sample_assignment(self, data_id, state):
         """
-        Sample new assignment from marginal distribution.
-        If cluster is "`new`", create a new cluster.
+        Samples new assignment from marginal distribution.
+        If cluster is "new", creates a new cluster.
+        
+        Arguments:
+            :int data_id: index of the sample to be assigned
+            :dict state:  current state
+        
+        Returns:
+            :int: index of the selected cluster
         """
         scores = self.cluster_assignment_distribution(data_id, state).items()
         labels, scores = zip(*scores)
@@ -420,22 +695,35 @@ class Sampler_SE:
         else:
             return int(cid)
 
-    def update_alpha(self, state, trimming = 100):
+    def update_alpha(self, state, burnin = 100):
+        '''
+        Updates concentration parameter using a Metropolis-Hastings sampling scheme.
+        
+        Arguments:
+            :dict state: current state
+            :int burnin: MH burnin
+        
+        Returns:
+            :double: new concentration parametere value
+        '''
         a_old = state['alpha_']
         n     = state['Ntot']
         K     = len(state['cluster_ids_'])
-        for _ in range(trimming):
-            a_new = a_old + random.RandomState().uniform(-1,1)*0.5#.gamma(1)
+        for _ in range(burnin):
+            a_new = a_old + random.RandomState().uniform(-1,1)*0.5
             if a_new > 0:
-                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old)
-                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new)
+                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
+                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
                 if logP_new - logP_old > np.log(random.uniform()):
                     a_old = a_new
         return a_old
 
     def gibbs_step(self, state):
         """
-        Collapsed Gibbs sampler for Dirichlet Process Mixture Model
+        Computes a single Gibbs step (updates all the sample assignments using conditional probabilities)
+        
+        Arguments:
+            :dict state: current state to update
         """
         # alpha sampling
         state['alpha_'] = self.update_alpha(state)
@@ -450,6 +738,12 @@ class Sampler_SE:
         self.n_clusters.append(len(state['cluster_ids_']))
     
     def sample_mixture_parameters(self, state):
+        '''
+        Draws a mixture sample (weights, means and variances) using conditional probabilities. Eqs. (3.2) and (3.3)
+        
+        Arguments:
+            :dict state: current state
+        '''
         ss = state['suffstats']
         alpha = [ss[cid].N + state['alpha_'] / state['num_clusters_'] for cid in state['cluster_ids_']]
         weights = random.RandomState().dirichlet(alpha).flatten()
@@ -469,6 +763,9 @@ class Sampler_SE:
         self.mixture_samples.append(components)
     
     def run_sampling(self):
+        """
+        Runs the sampling algorithm - Listing 1
+        """
         state = self.initial_state(self.mass_samples)
         for i in range(self.burnin):
             if self.verbose:
@@ -498,95 +795,102 @@ class Sampler_SE:
 
     def postprocess(self):
         """
-        Plots samples [x] for each event in separate plots along with inferred distribution.
+        Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
         """
-        
-        app  = np.linspace(self.m_min, self.m_max, 1000)
+        # mass values
+        lower_bound = max([self.m_min-1, self.glob_m_min])
+        upper_bound = min([self.m_max+1, self.glob_m_max])
+        app  = np.linspace(lower_bound, upper_bound, 1000)
+        da   = app[1]-app[0]
         percentiles = [5,16, 50, 84, 95]
-        
         p = {}
         
+        # plots samples histogram
         fig = plt.figure()
         ax  = fig.add_subplot(111)
-        ax.hist(self.mass_samples, bins = int(np.sqrt(len(self.mass_samples))), histtype = 'step', density = True)
+        ax.hist(self.initial_samples, bins = int(np.sqrt(len(self.initial_samples))), histtype = 'step', density = True, label = r"\textsc{Mass samples}")
+        
+        # evaluates log probabilities in mass space
         prob = []
-        for a in app:
-            prob.append([logsumexp([log_normal_density(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) for sample in self.mixture_samples])
+        for ai in app:
+            a = self.transform(ai)
+            prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
+        
+        log_draws_interp = []
+        for pr in np.array(prob).T:
+            log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
+        
+        # saves interpolant functions into pickle file
+        picklefile = open(self.output_posteriors + '/posterior_functions_{0}.pkl'.format(self.e_ID), 'wb')
+        pickle.dump(log_draws_interp, picklefile)
+        picklefile.close()
+        
+        # computes percentiles
         for perc in percentiles:
             p[perc] = np.percentile(prob, perc, axis = 1)
+        normalisation = logsumexp(p[50] + np.log(da))
+        for perc in percentiles:
+            p[perc] = p[perc] - normalisation
+        
+        # Saves median and CR
         names = ['m'] + [str(perc) for perc in percentiles]
         np.savetxt(self.output_recprob + '/log_rec_prob_{0}.txt'.format(self.e_ID), np.array([app, p[5], p[16], p[50], p[84], p[95]]).T, header = ' '.join(names))
+        
         for perc in percentiles:
             p[perc] = np.exp(np.percentile(prob, perc, axis = 1))
-        
+        for perc in percentiles:
+            p[perc] = p[perc]/np.exp(normalisation)
         prob = np.array(prob)
         
+        # Computes entropy between samples and median
         ent = []
-        
         for i in range(np.shape(prob)[1]):
             sample = np.exp(prob[:,i])
             ent.append(js(sample,p[50]))
         mean_ent = np.mean(ent)
         np.savetxt(self.output_entropy + '/KLdiv_{0}.txt'.format(self.e_ID), np.array(ent), header = 'mean JS distance = {0}'.format(mean_ent))
         
+        # saves mixture samples into pickle file
         picklefile = open(self.output_pickle + '/posterior_functions_{0}.pkl'.format(self.e_ID), 'wb')
         pickle.dump(self.mixture_samples, picklefile)
         picklefile.close()
         
+        # plots median and CR of reconstructed probability density
         self.sample_probs = prob
         self.median_mf = np.array(p[50])
         
-        ax.fill_between(app, p[95], p[5], color = 'lightgreen', alpha = 0.5)
-        ax.fill_between(app, p[84], p[16], color = 'aqua', alpha = 0.5)
-        ax.plot(app, p[50], marker = '', color = 'r')
+        ax.fill_between(app, p[95], p[5], color = 'mediumturquoise', alpha = 0.5)
+        ax.fill_between(app, p[84], p[16], color = 'darkturquoise', alpha = 0.5)
+        ax.plot(app, p[50], marker = '', color = 'steelblue', label = r"\textsc{Reconstructed}", zorder = 100)
         ax.set_xlabel('$M\ [M_\\odot]$')
         ax.set_ylabel('$p(M)$')
-        ax.set_xlim(min(self.mass_samples)-5, max(self.mass_samples)+5)
+        ax.set_xlim(lower_bound, upper_bound)
+        ax.grid(True,dashes=(1,3))
+        ax.legend(loc=0,frameon=False,fontsize=10)
         plt.savefig(self.output_pltevents + '/{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
-        fig = plt.figure()
-        for i, s in enumerate(self.mixture_samples[:25]):
-            ax = fig.add_subplot(5,int(len(self.mixture_samples[:25])/5),i+1)
-            app = np.linspace(min(self.mass_samples),max(self.mass_samples),1000)
-            for c in s.values():
-                p = np.exp(log_normal_density(app,c['mean'], c['sigma']))*c['weight']
-                ax.plot(app,p, linewidth = 0.4)
-                ax.set_xlabel('$M\ [M_\\odot]$')
-        plt.tight_layout()
-        fig.savefig(self.output_components +'/components_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
-        if self.autocorrelation:
-            self.compute_autocorrelation()
+        
+        # plots number of clusters
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(np.arange(1,len(self.n_clusters)+1), self.n_clusters, ls = '--', marker = ',', linewidth = 0.5)
         fig.savefig(self.output_n_clusters+'n_clusters_{0}.pdf'.format(self.e_ID), bbox_inches='tight')
         
+        # plots concentration parameter
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))))
         fig.savefig(self.alpha_folder+'/alpha_{0}.pdf'.format(self.e_ID), bbox_inches='tight')
     
-    def compute_autocorrelation(self):
-        dx = (self.m_max_plot - self.m_min)/1000.
-        square = np.sum(self.median_mf**2*dx)
-        autocorrelation = []
-        taus = []
-        for tau in range(self.n_draws//2):
-            autocorrelation.append(np.mean(np.array([np.sum((np.array(self.sample_probs)[:,i] - self.median_mf)*(np.array(self.sample_probs)[:,(i+tau)%self.n_draws]-self.median_mf)*dx) for i in range(self.n_draws)])))
-            taus.append(tau + 1)
-        fig = plt.figure()
-        ax  = fig.add_subplot(111)
-        ax.plot(taus, autocorrelation, marker = '')
-        ax.set_xlabel('$\\tau$ [a.u.]')
-        ax.set_ylabel('Autocorrelation')
-        plt.savefig(self.output_events+'/autocorrelation.pdf', bbox_inches = 'tight')
-        
-    def run(self):
+    def make_folders(self):
         """
-        Runs sampler, saves samples and produces output plots.
+        Creates directories.
+        WARNING: While running for the very first time a hierarchical inference with more than one parallel single-event analysis, this function could lead to an error:
+        
+        (FileExistsError: [Errno 17] File exists: 'filename').
+        
+        This is due to the fact that two different samplers are trying to create one of the shared folders at the same time.
+        To cure this, just re-run the inference with the same output path.
         """
-        
-        
-        # reconstructed events
         self.output_events = self.output_folder + '/reconstructed_events/'
         if not os.path.exists(self.output_events):
             os.mkdir(self.output_events)
@@ -599,43 +903,81 @@ class Sampler_SE:
         if not os.path.exists(self.output_events + '/events/'):
             os.mkdir(self.output_events + '/events/')
         self.output_pltevents = self.output_events + '/events/'
-        if not os.path.exists(self.output_events + '/components/'):
-            os.mkdir(self.output_events + '/components/')
-        self.output_components = self.output_events + '/components/'
         if not os.path.exists(self.output_events + '/pickle/'):
             os.mkdir(self.output_events + '/pickle/')
         self.output_pickle = self.output_events + '/pickle/'
+        if not os.path.exists(self.output_events + '/posteriors/'):
+            os.mkdir(self.output_events + '/posteriors/')
+        self.output_posteriors = self.output_events + '/posteriors/'
         if not os.path.exists(self.output_events + '/entropy/'):
             os.mkdir(self.output_events + '/entropy/')
         self.output_entropy = self.output_events + '/entropy/'
         if not os.path.exists(self.output_events + '/alpha/'):
             os.mkdir(self.output_events + '/alpha/')
         self.alpha_folder = self.output_events + '/alpha/'
+        return
+    
+    def run(self):
+        """
+        Runs the sampler, saves samples and produces output plots.
+        """
+        self.make_folders()
         self.run_sampling()
         self.postprocess()
         return
 
 class MF_Sampler():
-    # inheriting from actor class is not currently supported
+    '''
+    Class to reconstruct the mass function given a set of single-event posterior distributions
+    
+    Arguments:
+        :iterable posterior_functions_events: mixture draws for each event
+        :int burnin:                    number of steps to be discarded
+        :int n_draws:                   number of posterior density draws
+        :int step:                      number of steps between draws
+        :float alpha0: initial guess for concentration parameter
+        :float m_min:                   mass prior lower bound for the specific event
+        :float m_max:                   mass prior upper bound for the specific event
+        :float t_min:                   prior lower bound in probit space
+        :float t_max:                   prior upper bound in probit space
+        :str output_folder: output folder
+        :double initial_cluster_number: initial guess for the number of active clusters
+        :function injected_density:     python function with simulated density
+        :iterable true_masses:          draws from injected_density around which are drawn simulated samples
+        :double sigma_min: sigma prior lower bound
+        :double sigma_max: sigma prior upper bound
+        :double m_max_plot: upper mass limit for output plots
+        :int n_parallel_threads:        number of parallel actors to spawn
+        :int ncheck: number of draws between checkpoints
+        :double transformed:            mass samples are already in probit space
+        
+    Returns:
+        :MF_Sampler: instance of CGSampler class
+    
+    Example:
+        sampler = MF_Sampler(*args)
+        sampler.run()
+        
+    '''
     def __init__(self, posterior_functions_events,
                        burnin,
                        n_draws,
                        step,
-                       delta_M = 1,
                        alpha0 = 1,
                        m_min = 5,
                        m_max = 50,
+                       t_min = -4,
+                       t_max = 4,
                        output_folder = './',
-                       verbose = True,
                        initial_cluster_number = 5.,
                        injected_density = None,
                        true_masses = None,
-                       diagnostic = False,
-                       sigma_max = 5,
+                       sigma_min = 0.005,
+                       sigma_max = 0.7,
                        m_max_plot = 50,
-                       autocorrelation = False,
                        n_parallel_threads = 1,
-                       ncheck = 5
+                       ncheck = 5,
+                       transformed = False
                        ):
                        
         self.burnin  = burnin
@@ -643,9 +985,16 @@ class MF_Sampler():
         self.step    = step
         self.m_min   = m_min
         self.m_max   = m_max
+        if transformed:
+            self.t_min = t_min
+            self.t_max = t_max
+        else:
+            self.t_min = self.transform(m_min)
+            self.t_max = self.transform(m_max)
+         
+        self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.posterior_functions_events = posterior_functions_events
-        self.delta_M = delta_M
         self.m_max_plot = m_max_plot
         # DP parameters
         self.alpha0 = alpha0
@@ -656,18 +1005,56 @@ class MF_Sampler():
         self.output_folder = output_folder
         self.mixture_samples = []
         self.n_clusters = []
-        self.verbose = verbose
         self.injected_density = injected_density
         self.true_masses = true_masses
-        self.diagnostic = diagnostic
-        self.autocorrelation = autocorrelation
         self.n_parallel_threads = n_parallel_threads
         self.alpha_samples = []
         self.ncheck = ncheck
         
         self.p = Pool(n_parallel_threads)
         
+    def transform(self, samples):
+        '''
+        Coordinate change into probit space
+        
+        Arguments:
+            :float or np.ndarray samples: mass sample(s) to transform
+        Returns:
+            :float or np.ndarray: transformed sample(s)
+        '''
+        if self.m_min > 0:
+            min = self.m_min*0.9999
+        else:
+            min = self.m_min*1.0001
+        if self.m_max > 0:
+            max = self.m_max*1.0001
+        else:
+            max = self.m_max*0.9999
+        cdf_bounds = [min, max]
+        cdf = (samples - cdf_bounds[0])/(cdf_bounds[1]-cdf_bounds[0])
+        new_samples = np.sqrt(2)*erfinv(2*cdf-1)
+        return new_samples
+    
     def initial_state(self):
+        '''
+        Create initial state -  a dictionary that stores a number of useful variables
+        
+        Arguments:
+            :np.ndarray samples: transformed samples
+        
+        Returns:
+            :dict: new state. Entries are:
+                :list 'cluster_ids_':    list of active cluster labels
+                :np.ndarray 'data_':     transformed samples
+                :int 'num_clusters_':    number of active clusters
+                :double 'alpha_':        actual value of concentration parameter
+                :int 'Ntot':             total number of samples
+                :dict 'hyperparameters': parameters of the hyperpriors
+                :dict 'suffstats':       mean, variance and number of samples of each active cluster
+                :list 'assignment':      list of cluster assignments (one for each sample)
+                :dict 'ev_in_cl':        list of sample indices assigned to each cluster
+                :dict logL_D:            log-Likelihood for samples in cluster
+        '''
         self.update_draws()
         assign = [int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))]
         cluster_ids = list(np.arange(int(np.max(assign)+1)))
@@ -678,37 +1065,67 @@ class MF_Sampler():
             'alpha_': self.alpha0,
             'Ntot': len(self.posterior_draws),
             'assignment': assign,
-            'pi': {cid: self.alpha0 / self.icn for cid in cluster_ids},
             'ev_in_cl': {cid: list(np.where(np.array(assign) == cid)[0]) for cid in cluster_ids},
             'logL_D': {cid: None for cid in cluster_ids}
             }
         for cid in state['cluster_ids_']:
             events = [self.posterior_draws[i] for i in state['ev_in_cl'][cid]]
             n = len(events)
-            state['logL_D'][cid] = self.log_numerical_predictive(events, self.m_min, self.m_max, 0.1, self.sigma_max)
-        state['logL_D']["new"] = self.log_numerical_predictive([], self.m_min, self.m_max, 0.1, self.sigma_max)
+            state['logL_D'][cid] = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max)
+        state['logL_D']["new"] = self.log_numerical_predictive([], self.t_min, self.t_max, self.sigma_min, self.sigma_max)
         return state
     
     def log_predictive_likelihood(self, data_id, cluster_id, state):
+        '''
+        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster - part of Eq. (2.39)
+        
+        Arguments:
+            :int data_id:    index of the considered sample
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
+        '''
         if cluster_id == "new":
             events = []
-            return -np.log(self.m_max-self.m_min), -np.log(self.m_max-self.m_min)
+            return -np.log(self.t_max-self.t_min), -np.log(self.t_max-self.t_min)
         else:
             events = [self.posterior_draws[i] for i in state['ev_in_cl'][cluster_id]]
         n = len(events)
         events.append(self.posterior_draws[data_id])
         logL_D = state['logL_D'][cluster_id] #denominator
-        logL_N = self.log_numerical_predictive(events, self.m_min, self.m_max, 0.1, self.sigma_max) #numerator
+        logL_N = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max) #numerator
         return logL_N - logL_D, logL_N
 
-    def log_numerical_predictive(self, events, m_min, m_max, sigma_min, sigma_max):
-        I, dI = dblquad(integrand, m_min, m_max, gfun = lambda x: sigma_min, hfun = lambda x: sigma_max, args = [events, m_min, m_max, sigma_min, sigma_max])
-        return np.log(I)
+    def log_numerical_predictive(self, events, t_min, t_max, sigma_min, sigma_max):
+        """"
+        Computes integral over cluster parameters (mean and std) in Eq. (2.39)
+        Normalization constant is required to avoid underflow while working with a high number of events.
+        Arguments:
+            :list events:      single event posterior distributions associated with the cluster
+            :double t_min:     lower bound of mean parameter uniform prior
+            :double t_max:     upper bound of mean parameter uniform prior
+            :double sigma_min: lower bound of sigma parameter uniform prior
+            :double sigma_max: upper bound of sigma parameter uniform prior
+        Returns:
+            :double: log predictive likelihood
+        """
+        logN_cnst = compute_norm_const(0, 1, events) + np.log(t_max - t_min) + np.log(sigma_max - sigma_min)
+        I, dI = dblquad(integrand, t_min, t_max, gfun = sigma_min, hfun = sigma_max, args = [events, logN_cnst])
+        return np.log(I) + logN_cnst
     
     def cluster_assignment_distribution(self, data_id, state):
         """
         Compute the marginal distribution of cluster assignment
-        for each cluster.
+        for each cluster. Eq. (2.39)
+        
+        Arguments:
+            :int data_id: sample index
+            :dict state:  current state
+        
+        Returns:
+            :dict: p_i for each cluster
         """
         cluster_ids = list(state['ev_in_cl'].keys()) + ['new']
         # can't pickle injected density
@@ -724,6 +1141,21 @@ class MF_Sampler():
         return scores
         
     def compute_score(self, args):
+        """
+        Wrapper for log_predictive_likelihood and log_cluster_assign_score
+        (parallelized with Ray)
+        
+        Arguments:
+            :list args: list of arguments. Contains:
+                args[0]: sample index
+                args[1]: cluster index
+                args[2]: current state
+        Returns:
+            :list: list of computed values. Entries are:
+                ret[0]: cluster index
+                ret[1]: p_i for the considered cluster
+                ret[2]: log Likelihood
+        """
         data_id = args[0]
         cid     = args[1]
         state   = args[2]
@@ -734,8 +1166,16 @@ class MF_Sampler():
         
         
     def log_cluster_assign_score(self, cluster_id, state):
-        """Log-likelihood that a new point generated will
-        be assigned to cluster_id given the current state.
+        """
+        Log-likelihood that a new point generated will
+        be assigned to cluster_id given the current state. Eqs. (2.26) and (2.27)
+        
+        Arguments:
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
         """
         if cluster_id == "new":
             return np.log(state["alpha_"])
@@ -745,6 +1185,15 @@ class MF_Sampler():
             return np.log(len(state['ev_in_cl'][cluster_id]))
 
     def create_cluster(self, state):
+        '''
+        Creates a new cluster when a sample is assigned to "new".
+        
+        Arguments:
+            :dict state: current state to update
+        
+        Returns:
+            :int: new cluster label
+        '''
         state["num_clusters_"] += 1
         cluster_id = max(state['cluster_ids_']) + 1
         state['cluster_ids_'].append(cluster_id)
@@ -752,19 +1201,39 @@ class MF_Sampler():
         return cluster_id
 
     def destroy_cluster(self, state, cluster_id):
+        """
+        Removes an empty cluster
+        
+        Arguments:
+            :dict state:     current state to update
+            :int cluster_id: label of the target empty cluster
+        """
         state["num_clusters_"] -= 1
         state['cluster_ids_'].remove(cluster_id)
         state['ev_in_cl'].pop(cluster_id)
         
     def prune_clusters(self,state):
+        """
+        Selects empty cluster(s) and removes them.
+        
+        Arguments:
+            :dict state: current state to update
+        """
         for cid in state['cluster_ids_']:
             if len(state['ev_in_cl'][cid]) == 0:
                 self.destroy_cluster(state, cid)
 
     def sample_assignment(self, data_id, state):
         """
-        Sample new assignment from marginal distribution.
-        If cluster is "`new`", create a new cluster.
+        Samples new assignment from marginal distribution.
+        If cluster is "new", creates a new cluster.
+        
+        Arguments:
+            :int data_id: index of the sample to be assigned
+            :dict state:  current state
+        
+        Returns:
+            :int: index of the selected cluster
         """
         self.numerators = {}
         scores = self.cluster_assignment_distribution(data_id, state).items()
@@ -779,36 +1248,69 @@ class MF_Sampler():
             return int(cid)
 
     def update_draws(self):
+        """
+        Draws a set of N single event posterior samples, one for each event, from the pools.
+        Marginalisation over single event posterior distribution parameters - Eq. (2.39) - is carried   out drawing a new posterior distribution from the pool for every Gibbs
+        """
         draws = []
         for posterior_samples in self.posterior_functions_events:
             draws.append(posterior_samples[random.randint(len(posterior_samples))])
         self.posterior_draws = draws
     
     def drop_from_cluster(self, state, data_id, cid):
+        """
+        Removes a sample from a cluster.
+        
+        Arguments:
+            :dict state: current state
+            :data_id:    sample index
+            :cid:        cluster index
+        """
         state['ev_in_cl'][cid].remove(data_id)
         events = [self.posterior_draws[i] for i in state['ev_in_cl'][cid]]
         n = len(events)
-        state['logL_D'][cid] = self.log_numerical_predictive(events, self.m_min, self.m_max, 0.1, self.sigma_max)
+        state['logL_D'][cid] = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max)
 
     def add_to_cluster(self, state, data_id, cid):
+        """
+        Adds a sample to a cluster.
+        
+        Arguments:
+            :dict state: current state
+            :data_id:    sample index
+            :cid:        cluster index
+        """
         state['ev_in_cl'][cid].append(data_id)
 
-    def update_alpha(self, state, trimming = 100):
+    def update_alpha(self, state, burnin = 100):
+        '''
+        Updates concentration parameter using a Metropolis-Hastings sampling scheme.
+        
+        Arguments:
+            :dict state: current state
+            :int burnin: MH burnin
+        
+        Returns:
+            :double: new concentration parametere value
+        '''
         a_old = state['alpha_']
         n     = state['Ntot']
         K     = len(state['cluster_ids_'])
-        for _ in range(trimming):
-            a_new = a_old + random.RandomState().uniform(-1,1)*0.5#.gamma(1)
+        for _ in range(burnin):
+            a_new = a_old + random.RandomState().uniform(-1,1)*0.5
             if a_new > 0:
-                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old)
-                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new)
+                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
+                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
                 if logP_new - logP_old > np.log(random.uniform()):
                     a_old = a_new
         return a_old
     
     def gibbs_step(self, state):
         """
-        Collapsed Gibbs sampler for Dirichlet Process Mixture Model
+        Computes a single Gibbs step (updates all the sample assignments using conditional probabilities)
+        
+        Arguments:
+            :dict state: current state to update
         """
         self.update_draws()
         state['alpha_'] = self.update_alpha(state)
@@ -823,12 +1325,18 @@ class MF_Sampler():
         self.n_clusters.append(len(state['cluster_ids_']))
     
     def sample_mixture_parameters(self, state):
+        '''
+        Draws a mixture sample (weights, means and variances) using conditional probabilities. Eq. (3.7)
+        
+        Arguments:
+            :dict state: current state
+        '''
         alpha = [len(state['ev_in_cl'][cid]) + state['alpha_'] / state['num_clusters_'] for cid in state['cluster_ids_']]
         weights = stats.dirichlet(alpha).rvs(size=1).flatten()
         components = {}
         for i, cid in enumerate(state['cluster_ids_']):
             events = [self.posterior_draws[j] for j in state['ev_in_cl'][cid]]
-            m, s = sample_point(events, self.m_min, self.m_max, 0.1, self.sigma_max, burnin = 1000)
+            m, s = sample_point(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max, burnin = 1000)
             components[i] = {'mean': m, 'sigma': s, 'weight': weights[i]}
         self.mixture_samples.append(components)
     
@@ -845,50 +1353,84 @@ class MF_Sampler():
 
     def postprocess(self):
         """
-        Plots samples [x] for each event in separate plots along with inferred distribution.
+        Plots the inferred distribution and saves draws.
         """
-        
+        # mass values
         app  = np.linspace(self.m_min, self.m_max_plot, 1000)
         da = app[1]-app[0]
         percentiles = [50, 5,16, 84, 95]
-        
         p = {}
-        
         fig = plt.figure()
         fig.suptitle('Observed mass function')
         ax  = fig.add_subplot(111)
+        
+        # if provided (simulation) plots true masses histogram
         if self.true_masses is not None:
             truths = np.genfromtxt(self.true_masses, names = True)
-            ax.hist(truths['m'], bins = int(np.sqrt(len(truths['m']))), histtype = 'step', density = True)
+            ax.hist(truths['m'], bins = int(np.sqrt(len(truths['m']))), histtype = 'step', density = True, label = r"\textsc{True masses}")
+        
+        # evaluates log probabilities in mass space
         prob = []
-        for a in app:
-            prob.append([logsumexp([log_normal_density(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) for sample in self.mixture_samples])
+        for ai in app:
+            a = self.transform(ai)
+            prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
+        
+        log_draws_interp = []
+        for pr in np.array(prob).T:
+            log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
+        
+        # Saves interpolant functions into pickle file
+        name = self.output_events + '/posterior_functions_mf_'
+        extension ='.pkl'
+        x = 0
+        fileName = name + str(x) + extension
+        while os.path.exists(fileName):
+            x = x + 1
+            fileName = name + str(x) + extension
+        picklefile = open(fileName, 'wb')
+        pickle.dump(log_draws_interp, picklefile)
+        picklefile.close()
+        
+        # computes percentiles
         for perc in percentiles:
             p[perc] = np.percentile(prob, perc, axis = 1)
+        normalisation = np.sum(np.exp(p[50])*da)
+        for perc in percentiles:
+            p[perc] = p[perc] - np.log(normalisation)
         self.sample_probs = prob
+            
+        #saves median and CR
         self.median_mf = np.array(p[50])
         names = ['m'] + [str(perc) for perc in percentiles]
         np.savetxt(self.output_events + '/log_rec_obs_prob_mf.txt', np.array([app, p[50], p[5], p[16], p[84], p[95]]).T, header = ' '.join(names))
+        
         for perc in percentiles:
             p[perc] = np.exp(np.percentile(prob, perc, axis = 1))
+        for perc in percentiles:
+            p[perc] = p[perc]/normalisation
         
-        ax.fill_between(app, p[95], p[5], color = 'lightgreen', alpha = 0.5)
-        ax.fill_between(app, p[84], p[16], color = 'aqua', alpha = 0.5)
-        ax.plot(app, p[50], marker = '', color = 'r')
+        # plots median and CR of reconstructed probability density
+        ax.fill_between(app, p[95], p[5], color = 'mediumturquoise', alpha = 0.5)
+        ax.fill_between(app, p[84], p[16], color = 'darkturquoise', alpha = 0.5)
+        ax.plot(app, p[50], marker = '', color = 'steelblue', label = r"\textsc{Reconstructed}", zorder = 100)
+        
+        # if simulation, plots true probability density
         if self.injected_density is not None:
             norm = np.sum([self.injected_density(a)*(app[1]-app[0]) for a in app])
             density = np.array([self.injected_density(a)/norm for a in app])
-            ax.plot(app, density, color = 'm', marker = '', linewidth = 0.7)
+            ax.plot(app, density, color = 'k', marker = '', linewidth = 0.8, label = r"\textsc{Simulated - Observed}")
         ax.set_xlabel('$M\ [M_\\odot]$')
         ax.set_ylabel('$p(M)$')
+        ax.set_xlim(self.m_min*1.1, self.m_max_plot)
+        ax.grid(True,dashes=(1,3))
+        ax.legend(loc=0,frameon=False,fontsize=10)
         plt.savefig(self.output_events + '/obs_mass_function.pdf', bbox_inches = 'tight')
         ax.set_yscale('log')
         ax.set_ylim(np.min(p[50]))
         plt.savefig(self.output_events + '/log_obs_mass_function.pdf', bbox_inches = 'tight')
-        if self.injected_density is not None:
-            self.ppplot(p, app)
         
-        name = self.output_events + '/posterior_functions_mf_'
+        # saves mixture samples into pickle file
+        name = self.output_events + '/posterior_mixtures_mf_'
         extension ='.pkl'
         x = 0
         fileName = name + str(x) + extension
@@ -899,75 +1441,32 @@ class MF_Sampler():
         pickle.dump(self.mixture_samples, picklefile)
         picklefile.close()
         
+        # plots number of clusters
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(np.arange(1,len(self.n_clusters)+1), self.n_clusters, ls = '--', marker = ',', linewidth = 0.5)
         fig.savefig(self.output_events+'n_clusters_mf.pdf', bbox_inches='tight')
+        
+        # plots concentration parameter
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))))
         fig.savefig(self.output_events+'/gamma_mf.pdf', bbox_inches='tight')
-
-        if self.diagnostic:
-            fig = plt.figure()
-            for i, s in enumerate(self.mixture_samples[:25]):
-                ax = fig.add_subplot(5,int(len(self.mixture_samples[:25])/5),i+1)
-                app = np.linspace(min(self.mass_samples),max(self.mass_samples),1000)
-                for c in s.values():
-                    p = np.exp(log_normal_density(app,c['mean'], c['sigma']))*c['weight']
-                    ax.plot(app,p, linewidth = 0.4)
-                    ax.set_xlabel('$M\ [M_\\odot]$')
-            plt.tight_layout()
-            fig.savefig(self.output_events +'/components_mf.pdf', bbox_inches = 'tight')
-        if self.autocorrelation:
-            self.compute_autocorrelation()
-    
-    def compute_autocorrelation(self):
-        dx = (self.m_max_plot - self.m_min)/1000.
-        square = np.sum(self.median_mf**2*dx)
-        autocorrelation = []
-        taus = []
-        for tau in range(self.n_draws//2):
-            autocorrelation.append(np.mean(np.array([np.sum((np.array(self.sample_probs)[:,i] - self.median_mf)*(np.array(self.sample_probs)[:,(i+tau)%self.n_draws]-self.median_mf)*dx) for i in range(self.n_draws)])))
-            taus.append(tau + 1)
-        fig = plt.figure()
-        ax  = fig.add_subplot(111)
-        ax.plot(taus, autocorrelation, marker = '')
-        ax.set_xlabel('$\\tau$ [a.u.]')
-        ax.set_ylabel('Autocorrelation')
-        plt.savefig(self.output_events+'/autocorrelation.pdf', bbox_inches = 'tight')
-
-    
-    def ppplot(self, p, a):
-        f50 = interp1d(a, p[50], bounds_error = False, fill_value = 0)
-        cdft  = []
-        cdf50 = []
-        norm = np.sum([self.injected_density(ai)*(a[1]-a[0]) for ai in a])
-        for i in range(len(a)):
-            cdft.append(np.sum([self.injected_density(xi)**(a[1]-a[0])/norm for xi in a[:i+1]]))
-            cdf50.append(np.sum([f50(xi)**(a[1]-a[0]) for xi in a[:i+1]]))
-        fig = plt.figure()
-        ax  = fig.add_subplot(111)
-        fig.suptitle('PP plot')
-        ax.set_xlabel('Simulated f(M)')
-        ax.set_ylabel('Reconstructed f(M)')
-        ax.plot(np.linspace(0,1, 100), np.linspace(0,1,100), marker = '', linewidth = 0.5, color = 'k')
-        ax.plot(cdft, cdf50, ls = '--', marker = '', color = 'r')
-        plt.savefig(self.output_events+'PPplot.pdf', bbox_inches = 'tight')
         
-        rec_median = np.array([f50(ai) for ai in a])
-        inj = np.array([self.injected_density(ai)/norm for ai in a])
-        ent = js(rec_median, inj)
-        print('Jensen-Shannon distance: {0} nats'.format(ent))
-        np.savetxt(self.output_events + '/relative_entropy.txt', np.array([ent]))
+        # if simulation, computes Jensen-Shannon distance
+        if self.injected_density is not None:
+            ent = [js(np.exp(s(app)), density) for s in log_draws_interp]
+            JSD = {}
+            for perc in percentiles:
+                JSD[perc] = np.percentile(ent, perc, axis = 0)
+            print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]))
+            np.savetxt(output + '/JSD.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
         
     
     def run(self):
         """
         Runs sampler, saves samples and produces output plots.
         """
-
-        # reconstructed events
         self.output_events = self.output_folder
         if not os.path.exists(self.output_events):
             os.mkdir(self.output_events)
@@ -976,20 +1475,38 @@ class MF_Sampler():
         return
 
     def checkpoint(self):
-        samps = []
+        """
+        Saves to file recent draws
+        """
         try:
             picklefile = open(self.output_events + '/checkpoint.pkl', 'rb')
             samps = pickle.load(picklefile)
             picklefile.close()
         except:
-            pass
+            samps = []
         
-        samps = samps + self.mixture_samples[-self.ncheck:]
+        # evaluates probabilities in mass space
+        app  = np.linspace(self.m_min, self.m_max_plot, 1000)
+        da = app[1]-app[0]
+        prob = []
+        for ai in app:
+            a = self.transform(ai)
+            prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples[-self.ncheck:]])
+
+        log_draws_interp = []
+        for pr in np.array(prob).T:
+            log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
+        
+        # saves new samples
+        samps = samps + log_draws_interp
         picklefile = open(self.output_events + '/checkpoint.pkl', 'wb')
         pickle.dump(samps, picklefile)
         picklefile.close()
 
     def run_sampling(self):
+        """
+        Runs the sampling algorithm - Listing 2
+        """
         self.state = self.initial_state()
         for i in range(self.burnin):
             print('\rBURN-IN MF: {0}/{1}'.format(i+1, self.burnin), end = '')
@@ -1005,35 +1522,5 @@ class MF_Sampler():
         print('\n', end = '')
         return
 
-def log_normal_density(x, x0, sigma):
-    """
-    Normal probability density function.
-    
-    ------------
-    Arguments:
-        :double x:     Point.
-        :double x0:    Mean.
-        :double sigma: Variance.
-    Returns:
-        :double:       N(x).
-    """
-    return (-(x-x0)**2/(2*sigma**2))-np.log(np.sqrt(2*np.pi)*sigma)
-    
-#@jit(nopython = True, nogil = True, cache = True)
-#def log_norm(x, x0, sigma):
-#    return -((x-x0)**2)/(2*(sigma**2)) - np.log(np.sqrt(2*np.pi)) - 0.5*np.log(sigma**2)
-#
-#
-#def integrand(sigma, mu, events, m_min, m_max, sigma_min, sigma_max):
-#    return np.exp(np.sum([my_logsumexp(np.array([np.log(component['weight']) + log_norm(mu, component['mean'], sigma) for component in ev.values()])) for ev in events]))
-#
-#@jit(nopython = True, nogil = True, cache = True)
-#def my_logsumexp(a):
-#    a_max = a.max()
-#    tmp = np.exp(a - a_max)
-#    s = np.sum(tmp)
-#    out = np.log(s)
-#    out += a_max
-#    return out
 
-# π ∑ w_k e^(mu - mu_k)^2/sigma
+

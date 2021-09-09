@@ -9,7 +9,7 @@ def log_norm(x, x0, sigma1, sigma2):
 def log_posterior(mu, sigma, events, sigma_min, sigma_max, m_min, m_max):
     if not (sigma_min < sigma < sigma_max and m_min < mu < m_max):
         return -np.inf
-    events_sum = np.sum([logsumexp([np.log(component['weight']) + log_norm(mu, component['mean'], sigma, component['sigma']) for component in ev.values()]) for ev in events])
+    events_sum = np.sum([logsumexp([np.log(component['weight']) + log_norm(mu, component['mean'], sigma, component['sigma']) for component in ev.values()]) for ev in events]) - np.log(sigma)
     return events_sum
 
 def propose_point(old_point, dm, ds):
