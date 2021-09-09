@@ -1,9 +1,9 @@
 # hdp-population
 Source code for the inference of black hole mass function using (H)DPGMM.
-This code implements a Gibbs sampler to explore DPGMMs in a hierarchical fashion.
+This code implements a Gibbs sampler to explore a hierarchy of DPGMMs.
 If you use this code, please cite the paper https://arxiv.org/pdf/xxxx.xxxxx.pdf (currently in preparation).
 
-Requirements:
+## Requirements:
 * Numpy
 * Scipy
 * Matplotlib
