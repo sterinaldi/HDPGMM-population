@@ -159,7 +159,7 @@ def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, inj
         :callable inj_density: if simulation, method containing injected density
     """
     # Mass values
-    app = np.linspace(mmin, mmax, 1000)
+    app = np.linspace(m_min, m_max, 1000)
     da = app[1]-app[0]
     percentiles = [50, 5,16, 84, 95]
 
@@ -188,7 +188,7 @@ def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, inj
     
     # Saves median and CR
     names = ['m']+[str(perc) for perc in percentiles]
-    np.savetxt(output + '/mass_function/log_rec_prob_mf.txt',  np.array([app, mf[50], mf[5], mf[16], mf[84], mf[95]]).T, header = ' '.join(names))
+    np.savetxt(output + '/log_rec_prob_mf.txt',  np.array([app, mf[50], mf[5], mf[16], mf[84], mf[95]]).T, header = ' '.join(names))
 
     fig = plt.figure()
     ax  = fig.add_subplot(111)
@@ -219,7 +219,7 @@ def save_options(options):
     Saves options for the run (for reproducibility)
     
     Arguments:
-        :dict options: run options
+        :dict options: options
     """
     logfile = open(options.output + '/options_log.txt', 'w')
     for key, val in zip(vars(options).keys(), vars(options).values()):
