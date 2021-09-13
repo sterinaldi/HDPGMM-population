@@ -1326,7 +1326,7 @@ class MF_Sampler():
     
     def sample_mixture_parameters(self, state):
         '''
-        Draws a mixture sample (weights, means and variances) using conditional probabilities. Eq. (3.7)
+        Draws a mixture sample (weights, means and std) using conditional probabilities. Eq. (3.7)
         
         Arguments:
             :dict state: current state
