@@ -367,7 +367,7 @@ def main():
     
     # Plots median and CR (astrophysical)
     if options.selection_function is not None:
-        plot_astrophysical_distribution(samples = samples_set, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, sel_func, inj_density = inj_density)
+        plot_astrophysical_distribution(samples = samples_set, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, sel_func = sel_func, inj_density = inj_density)
     
         
     
