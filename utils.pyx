@@ -62,9 +62,9 @@ cdef double _integrand(double[::1] values, list events, double logN_cnst, unsign
     cdef double logprob = 0.0
     cdef dict ev
     cdef double[::1] mu = values[:dim]
-    cdef double[::1] sigma = values[dim:2*dim+1]#_make_sym_matrix(dim, values[dim:])
+    cdef double[::1] sigma = values[dim:2*dim+1]
     cdef double[::1] rho = values[2*dim+1:]
-    cdef np.ndarray[double,ndim=2,mode='c'] norm_cov = np.identity(dim)*0.5
+    cdef np.ndarray[double,ndim=2,mode='c'] norm_cov = np.identity(dim)*0.5*sigma*sigma
     cdef double[:,:] norm_cov_view = norm_cov
     cdef np.ndarray[double,ndim=2,mode='c'] cov
     for i in range(dim):
