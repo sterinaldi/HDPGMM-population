@@ -45,23 +45,17 @@ class Integrator(cpnest.model.Model):
         self.events    = events
         self.logN_cnst = logN_cnst
         self.dim       = dim
-        self.names     = ['m{0}'.format(i+1) for i in range(self.dim)] + ['s{0}'.format(j) for j in range(int(self.dim*(self.dim+1)/2.))]
-        self.bounds    = bounds
+        self.names     = ['m{0}'.format(i+1) for i in range(self.dim)] + ['s{0}'.format(i+1) for i in range(self.dim)] + ['r{0}'.format(j) for j in range(int(self.dim*(self.dim-1)/2.))]
+        self.bounds    = bounds + [[-1,1] for _ in range(int(self.dim*(self.dim-1)/2.))]
     
     def log_prior(self, x):
         
         logP = super(Integrator, self).log_prior(x)
-        if np.isfinite(logP):
-            s_vals = np.array([x['s{0}'.format(j)] for j in range(int(self.dim*(self.dim+1)/2.))])
-            if det(make_sym_matrix(self.dim, s_vals)) == 0:
-                logP = -np.inf
-            else:
-                logP = 0.
         return logP
     
     def log_likelihood(self, x):
-        vals = np.array([x[name] for name in self.names])
-        return integrand(vals, self.events, self.logN_cnst, self.dim)
+#        vals = np.array([x[name] for name in self.names])
+        return integrand(x.values, self.events, self.logN_cnst, self.dim)
 
 """
 Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
@@ -980,10 +974,10 @@ class MF_Sampler():
         return logL_N - logL_D, logL_N
 
     def log_numerical_predictive(self, events, t_min, t_max, sigma_min, sigma_max):
-        logN_cnst = compute_norm_const(np.zeros(self.dim), np.identity(self.dim), events) + logsumexp([np.log(tmax - tmin) for tmin, tmax in zip(t_min, t_max)]) + np.log(sigma_max - sigma_min)*self.dim*(self.dim + 1)/2.
-        bounds = [[tmin, tmax] for tmin, tmax in zip(t_min, t_max)] + [[sigma_min, sigma_max] for _ in range(int(self.dim*(self.dim + 1)/2.))]
+        logN_cnst = compute_norm_const(np.zeros(self.dim), np.identity(self.dim), events) + logsumexp([np.log(tmax - tmin) for tmin, tmax in zip(t_min, t_max)]) + np.log(sigma_max - sigma_min)*self.dim*(self.dim - 1)/2.
+        bounds = [[tmin, tmax] for tmin, tmax in zip(t_min, t_max)] + [[sigma_min, sigma_max] for _ in range(int(self.dim*(self.dim - 1)/2.))]
         integrator = Integrator(bounds, events, logN_cnst, self.dim)
-        work = cpnest.CPNest(integrator, verbose = 1, nlive = 1000, maxmcmc = 1000, nthreads = 1, output = self.output_folder)
+        work = cpnest.CPNest(integrator, verbose = 0, nlive = self.dim*(self.dim+3)+1, maxmcmc = 1000, nensemble = 1, output = self.output_folder)
         work.run()
         return work.NS.logZ
         #I, dI, d = nquad(integrand, bounds, args = [events, logN_cnst, self.dim])

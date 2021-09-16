@@ -16,21 +16,6 @@ cdef inline double _scalar_log_norm(double x, double x0, double s) nogil: return
 @cython.wraparound(False)
 @cython.nonecheck(False)
 @cython.cdivision(True)
-cdef np.ndarray _make_sym_matrix(int n, np.ndarray vals):
-  m = np.zeros([n,n], dtype=np.double)
-  xs,ys = np.triu_indices(n,k=1)
-  m[xs,ys] = vals[n:]
-  m[ys,xs] = vals[n:]
-  m[ np.diag_indices(n) ] = vals[:n]
-  return m
-
-def make_sym_matrix(int n, np.ndarray vals):
-    return _make_sym_matrix(n,vals)
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-@cython.nonecheck(False)
-@cython.cdivision(True)
 cdef double _log_norm(np.ndarray x, np.ndarray x0, np.ndarray sigma):
     try:
         logP = mn(mean = x0, cov = sigma).logpdf(x)
@@ -72,21 +57,26 @@ cdef double _log_prob_mixture(np.ndarray mu, np.ndarray sigma, dict ev):
 @cython.wraparound(False)
 @cython.nonecheck(False)
 @cython.cdivision(True)
-cdef double _integrand(np.ndarray values, list events, double logN_cnst, int dim):
+cdef double _integrand(double[::1] values, list events, double logN_cnst, unsigned int dim):
+    cdef unsigned int i,j
     cdef double logprob = 0.0
     cdef dict ev
-    cdef np.ndarray mu = values[:dim]
-    cdef np.ndarray sigma = _make_sym_matrix(dim, values[dim:])
+    cdef double[::1] mu = values[:dim]
+    cdef double[::1] sigma = values[dim:2*dim+1]#_make_sym_matrix(dim, values[dim:])
+    cdef double[::1] rho = values[2*dim+1:]
+    cdef np.ndarray[double,ndim=2,mode='c'] norm_cov = np.identity(dim)*0.5
+    cdef double[:,:] norm_cov_view = norm_cov
+    cdef np.ndarray[double,ndim=2,mode='c'] cov
+    for i in range(dim):
+        for j in range(dim):
+            if i < j:
+                norm_cov_view[i,j] = rho[dim*i + (j-i)]*sigma[i]*sigma[j]
+    cov = norm_cov + norm_cov.T
     for ev in events:
-        logprob += _log_prob_mixture(mu, sigma, ev)
+        logprob += _log_prob_mixture(mu, cov, ev)
     return logprob - logN_cnst
-    #return exp(logprob - logN_cnst)
 
-def integrand(*args):
-    values = np.array([v for v in args[:-3]])
-    cdef list events = args[-3]
-    cdef double logN_cnst = args[-2]
-    cdef int dim = args[-1]
+def integrand(double[::1] values, list events, double logN_cnst, unsigned int dim):
     return _integrand(values, events, logN_cnst, dim)
 
 @cython.boundscheck(False)
