@@ -906,7 +906,6 @@ class MF_Sampler():
         self.output_folder = output_folder
         self.mixture_samples = []
         self.n_clusters = []
-#        self.injected_density = injected_density
         self.true_masses = true_masses
         self.n_parallel_threads = n_parallel_threads
         self.alpha_samples = []
@@ -950,6 +949,7 @@ class MF_Sampler():
             'pi': {cid: self.alpha0 / self.icn for cid in cluster_ids},
             'ev_in_cl': {cid: list(np.where(np.array(assign) == cid)[0]) for cid in cluster_ids},
             'logL_D': {cid: None for cid in cluster_ids}
+            'starting_points': {}
             }
         for cid in state['cluster_ids_']:
             events = [self.posterior_draws[i] for i in state['ev_in_cl'][cid]]
@@ -970,7 +970,8 @@ class MF_Sampler():
         n = len(events)
         events.append(self.posterior_draws[data_id])
         logL_D = state['logL_D'][cluster_id] #denominator
-        logL_N = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max) #numerator
+        logL_N, starting_point = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max) #numerator
+        state['starting_points'][cluster_id] = starting_point
         return logL_N - logL_D, logL_N
 
     def log_numerical_predictive(self, events, t_min, t_max, sigma_min, sigma_max):
@@ -979,7 +980,7 @@ class MF_Sampler():
         integrator = Integrator(bounds, events, logN_cnst, self.dim)
         work = cpnest.CPNest(integrator, verbose = 0, nlive = self.dim*(self.dim+3)+1, maxmcmc = 1000, nensemble = 1, output = self.output_folder)
         work.run()
-        return work.NS.logZ
+        return work.NS.logZ, work.posterior_samples[-1]
         #I, dI, d = nquad(integrand, bounds, args = [events, logN_cnst, self.dim])
         #return np.log(I) + logN_cnst
     
@@ -1028,6 +1029,7 @@ class MF_Sampler():
         cluster_id = max(state['cluster_ids_']) + 1
         state['cluster_ids_'].append(cluster_id)
         state['ev_in_cl'][cluster_id] = []
+        state['starting_points'][cluster_id] = state['starting_points']["new"]
         return cluster_id
 
     def destroy_cluster(self, state, cluster_id):
@@ -1110,7 +1112,7 @@ class MF_Sampler():
         components = {}
         for i, cid in enumerate(state['cluster_ids_']):
             events = [self.posterior_draws[j] for j in state['ev_in_cl'][cid]]
-            m, s = sample_point(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max, self.n_dim, burnin = 1000)
+            m, s = sample_point(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max, self.n_dim, state['starting_points'][cid])
             components[i] = {'mean': m, 'sigma': s, 'weight': weights[i]}
         self.mixture_samples.append(components)
     
