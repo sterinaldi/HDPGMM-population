@@ -104,7 +104,7 @@ def natural_keys(text):
 class CGSampler:
     '''
     Class to analyse a set of mass posterior samples and reconstruct the mass distribution.
-    WARNING: despite being suitable to solve many different inference problems, thia algorithm was implemented to infer the black hole mass function. Both variable names and documentation are written accordingly.
+    WARNING: despite being suitable to solve many different inference problems, this algorithm was implemented to infer the black hole mass function. Both variable names and documentation are written accordingly.
     
     Arguments:
         :iterable events:               list of single-event posterior samples
@@ -112,7 +112,7 @@ class CGSampler:
         :list samp_settings_ev:         settings for single event chain (see above)
         :float alpha0:                  initial guess for single-event concentration parameter
         :float gamma0:                  initial guess for mass function concentration parameter
-        :list hyperpriors_ev:           hyperpriors for single-event NIG prior
+        :list prior_ev:                 parameters for single-event NIG prior
         :float m_min:                   lower bound of mass prior
         :float m_max:                   upper bound of mass prior
         :bool verbose:                  verbosity of single-event analysis
@@ -136,10 +136,11 @@ class CGSampler:
                        samp_settings_ev = None,
                        alpha0 = 1,
                        gamma0 = 1,
-                       hyperpriors_ev = [1,1/4.], #a, V
+                       prior_ev = [1,1/4.], #a, V
                        m_min = 5,
                        m_max = 70,
                        verbose = True,
+                       diagnostic = False,
                        output_folder = './',
                        initial_cluster_number = 5.,
                        process_events = True,
@@ -149,39 +150,45 @@ class CGSampler:
                        names = None,
                        ):
         
+        # Settings
         self.burnin_mf, self.n_draws_mf, self.step_mf = samp_settings
+        
         if samp_settings_ev is not None:
             self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings_ev
         else:
             self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings
-        self.events = events
-        sample_min = np.min([np.min(a) for a in self.events])
-        sample_max = np.max([np.max(a) for a in self.events])
-        self.m_min   = min([m_min, sample_min])
-        self.m_max   = max([m_max, sample_max])
-        self.m_max_plot = m_max
-        # probit
+            
+        self.verbose            = verbose
+        self.diagnostic         = diagnostic
+        self.process_events     = process_events
+        self.n_parallel_threads = n_parallel_threads
+        self.events             = events
+        self.m_max_plot         = m_max
+        self.event_samplers     = []
+        
+        # Probit
         self.transformed_events = [self.transform(ev) for ev in events]
-        self.t_min = self.transform(self.m_min)
-        self.t_max = self.transform(self.m_max)
-        # DP
+        self.t_min              = self.transform(self.m_min)
+        self.t_max              = self.transform(self.m_max)
+        
+        # Dirichlet Process
         self.alpha0 = alpha0
         self.gamma0 = gamma0
-        # student-t
-        if hyperpriors_ev is not None:
-            self.a_ev, self.V_ev = hyperpriors_ev
-        else:
-            self.a_ev, self.V_ev = [1,1/4.]
-        # miscellanea
-        self.output_folder = output_folder
-        self.icn = initial_cluster_number
-        self.event_samplers = []
-        self.verbose = verbose
-        self.process_events = process_events
-        self.n_parallel_threads = n_parallel_threads
-        self.injected_density = injected_density
-        self.true_masses = true_masses
-        self.output_recprob = self.output_folder + '/reconstructed_events/pickle/'
+        self.icn    = initial_cluster_number
+        
+        # Priors
+        self.a_ev, self.V_ev = prior_ev
+        sample_min           = np.min([np.min(a) for a in self.events])
+        sample_max           = np.max([np.max(a) for a in self.events])
+        self.m_min           = min([m_min, sample_min])
+        self.m_max           = max([m_max, sample_max])
+        
+        # Output
+        self.output_folder      = output_folder
+        self.injected_density   = injected_density
+        self.true_masses        = true_masses
+        self.output_recprob     = self.output_folder + '/reconstructed_events/pickle/'
+        
         if names is not None:
             self.names = names
         else:
@@ -189,7 +196,11 @@ class CGSampler:
             
     def transform(self, samples):
         '''
-        Coordinate change into probit space
+        Coordinate change into probit space.
+        cdf_normal is the cumulative distribution function of the unit normal distribution.
+        
+        t(m) = cdf_normal((m-m_min)/(m_max - m_min))
+
         
         Arguments:
             :float or np.ndarray samples: mass sample(s) to transform
@@ -355,7 +366,7 @@ class SE_Sampler:
     Class to reconstruct a posterior density function given samples.
     
     Arguments:
-        :iterable mass_samples:         mass samples (in probit or normal space)
+        :iterable mass_samples:         mass samples (in probit or natural space)
         :str event_id:                  name to be given to outputs
         :int burnin:                    number of steps to be discarded
         :int n_draws:                   number of posterior density draws
@@ -455,6 +466,9 @@ class SE_Sampler:
     def transform(self, samples):
         '''
         Coordinate change into probit space
+        cdf_normal is the cumulative distribution function of the unit normal distribution.
+        
+        t(m) = cdf_normal((m-m_min)/(m_max - m_min))
         
         Arguments:
             :float or np.ndarray samples: mass sample(s) to transform
@@ -1016,6 +1030,10 @@ class MF_Sampler():
     def transform(self, samples):
         '''
         Coordinate change into probit space
+        cdf_normal is the cumulative distribution function of the unit normal distribution.
+        
+        t(m) = cdf_normal((m-m_min)/(m_max - m_min))
+
         
         Arguments:
             :float or np.ndarray samples: mass sample(s) to transform
