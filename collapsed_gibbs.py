@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import re
-import pickle
+import json
 
 from collections import namedtuple, Counter
 from numpy import random
@@ -165,6 +165,13 @@ class CGSampler:
         self.events             = events
         self.m_max_plot         = m_max
         self.event_samplers     = []
+
+        # Priors
+        self.a_ev, self.V_ev = prior_ev
+        sample_min           = np.min([np.min(a) for a in self.events])
+        sample_max           = np.max([np.max(a) for a in self.events])
+        self.m_min           = min([m_min, sample_min])
+        self.m_max           = max([m_max, sample_max])
         
         # Probit
         self.transformed_events = [self.transform(ev) for ev in events]
@@ -176,18 +183,11 @@ class CGSampler:
         self.gamma0 = gamma0
         self.icn    = initial_cluster_number
         
-        # Priors
-        self.a_ev, self.V_ev = prior_ev
-        sample_min           = np.min([np.min(a) for a in self.events])
-        sample_max           = np.max([np.max(a) for a in self.events])
-        self.m_min           = min([m_min, sample_min])
-        self.m_max           = max([m_max, sample_max])
-        
         # Output
         self.output_folder      = output_folder
         self.injected_density   = injected_density
         self.true_masses        = true_masses
-        self.output_recprob     = self.output_folder + '/reconstructed_events/pickle/'
+        self.output_recprob     = self.output_folder + '/reconstructed_events/mixtures/'
         
         if names is not None:
             self.names = names
@@ -284,9 +284,9 @@ class CGSampler:
         prob_files = [self.output_recprob+f for f in os.listdir(self.output_recprob) if f.startswith('posterior_functions')]
         prob_files.sort(key = natural_keys)
         for prob in prob_files:
-            sampfile = open(prob, 'rb')
-            samps = pickle.load(sampfile)
-            self.posterior_functions_events.append(samps)
+            sampfile = open(prob, 'r')
+            samps = json.load(sampfile)
+            self.posterior_functions_events.append(np.array([d for d in samps.values()]))
     
     def display_config(self):
         print('Collapsed Gibbs sampler')
@@ -410,6 +410,7 @@ class SE_Sampler:
                        glob_m_min = None,
                        output_folder = './',
                        verbose = True,
+                       diagnostic = False,
                        initial_cluster_number = 5.,
                        transformed = False
                        ):
@@ -447,11 +448,11 @@ class SE_Sampler:
         self.sigma_max = np.std(self.mass_samples)/2.
         # DP parameters
         self.alpha0 = alpha0
-        # Student-t parameters
+        # NIG prior parameters
         self.b  = a*(np.std(self.mass_samples)/4.)**2
+        self.mu = np.mean(self.mass_samples)
         self.a  = a
         self.V  = V
-        self.mu = np.mean(self.mass_samples)
         # Miscellanea
         self.icn    = initial_cluster_number
         self.states = []
@@ -461,6 +462,7 @@ class SE_Sampler:
         self.mixture_samples = []
         self.n_clusters = []
         self.verbose = verbose
+        self.diagnostic = diagnostic
         self.alpha_samples = []
         
     def transform(self, samples):
@@ -830,14 +832,11 @@ class SE_Sampler:
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
-        log_draws_interp = []
-        for pr in np.array(prob).T:
-            log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
-        
-        # saves interpolant functions into pickle file
-        picklefile = open(self.output_posteriors + '/posterior_functions_{0}.pkl'.format(self.e_ID), 'wb')
-        pickle.dump(log_draws_interp, picklefile)
-        picklefile.close()
+        # saves interpolant functions into json file
+        jsonfile = open(self.output_posteriors + '/posterior_functions_{0}.json'.format(self.e_ID), 'w')
+        j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
+        json.dump(j_dict, jsonfile)
+        jsonfile.close()
         
         # computes percentiles
         for perc in percentiles:
@@ -864,10 +863,11 @@ class SE_Sampler:
         mean_ent = np.mean(ent)
         np.savetxt(self.output_entropy + '/KLdiv_{0}.txt'.format(self.e_ID), np.array(ent), header = 'mean JS distance = {0}'.format(mean_ent))
         
-        # saves mixture samples into pickle file
-        picklefile = open(self.output_pickle + '/posterior_functions_{0}.pkl'.format(self.e_ID), 'wb')
-        pickle.dump(self.mixture_samples, picklefile)
-        picklefile.close()
+        # saves mixture samples into json file
+        jsonfile = open(self.output_mixtures + '/posterior_functions_{0}.json'.format(self.e_ID), 'w')
+        j_dict = {str(i): sample for i, sample in enumerate(self.mixture_samples)}
+        json.dump(j_dict, jsonfile)
+        jsonfile.close()
         
         # plots median and CR of reconstructed probability density
         self.sample_probs = prob
@@ -917,9 +917,9 @@ class SE_Sampler:
         if not os.path.exists(self.output_events + '/events/'):
             os.mkdir(self.output_events + '/events/')
         self.output_pltevents = self.output_events + '/events/'
-        if not os.path.exists(self.output_events + '/pickle/'):
-            os.mkdir(self.output_events + '/pickle/')
-        self.output_pickle = self.output_events + '/pickle/'
+        if not os.path.exists(self.output_events + '/mixtures/'):
+            os.mkdir(self.output_events + '/mixtures/')
+        self.output_mixtures = self.output_events + '/mixtures/'
         if not os.path.exists(self.output_events + '/posteriors/'):
             os.mkdir(self.output_events + '/posteriors/')
         self.output_posteriors = self.output_events + '/posteriors/'
@@ -949,7 +949,7 @@ class MF_Sampler():
         :int burnin:                    number of steps to be discarded
         :int n_draws:                   number of posterior density draws
         :int step:                      number of steps between draws
-        :float alpha0: initial guess for concentration parameter
+        :float alpha0:                  initial guess for concentration parameter
         :float m_min:                   mass prior lower bound for the specific event
         :float m_max:                   mass prior upper bound for the specific event
         :float t_min:                   prior lower bound in probit space
@@ -991,7 +991,8 @@ class MF_Sampler():
                        m_max_plot = 50,
                        n_parallel_threads = 1,
                        ncheck = 5,
-                       transformed = False
+                       transformed = False,
+                       diagnostic = False,
                        ):
                        
         self.burnin  = burnin
@@ -1024,6 +1025,7 @@ class MF_Sampler():
         self.n_parallel_threads = n_parallel_threads
         self.alpha_samples = []
         self.ncheck = ncheck
+        self.diagnostic = diagnostic
         
         self.p = Pool(n_parallel_threads)
         
@@ -1393,21 +1395,19 @@ class MF_Sampler():
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
-        log_draws_interp = []
-        for pr in np.array(prob).T:
-            log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
-        
-        # Saves interpolant functions into pickle file
+
+        # Saves interpolant functions into json file
         name = self.output_events + '/posterior_functions_mf_'
-        extension ='.pkl'
+        extension ='.json'
         x = 0
         fileName = name + str(x) + extension
         while os.path.exists(fileName):
             x = x + 1
             fileName = name + str(x) + extension
-        picklefile = open(fileName, 'wb')
-        pickle.dump(log_draws_interp, picklefile)
-        picklefile.close()
+        jsonfile = open(fileName, 'w')
+        j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
+        json.dump(j_dict, jsonfile)
+        jsonfile.close()
         
         # computes percentiles
         for perc in percentiles:
@@ -1447,17 +1447,19 @@ class MF_Sampler():
         ax.set_ylim(np.min(p[50]))
         plt.savefig(self.output_events + '/log_obs_mass_function.pdf', bbox_inches = 'tight')
         
-        # saves mixture samples into pickle file
+        # saves mixture samples into json file
         name = self.output_events + '/posterior_mixtures_mf_'
-        extension ='.pkl'
+        extension ='.json'
         x = 0
         fileName = name + str(x) + extension
         while os.path.exists(fileName):
             x = x + 1
             fileName = name + str(x) + extension
-        picklefile = open(fileName, 'wb')
-        pickle.dump(self.mixture_samples, picklefile)
-        picklefile.close()
+            
+        j_dict = {str(i): sample for i, sample in enumerate(self.mixture_samples)}
+        jsonfile = open(fileName, 'w')
+        json.dump(j_dict, jsonfile)
+        jsonfile.close()
         
         # plots number of clusters
         fig = plt.figure()
@@ -1496,30 +1498,28 @@ class MF_Sampler():
         """
         Saves to file recent draws
         """
-        try:
-            picklefile = open(self.output_events + '/checkpoint.pkl', 'rb')
-            samps = pickle.load(picklefile)
-            picklefile.close()
-        except:
-            samps = []
-        
-        # evaluates probabilities in mass space
+
         app  = np.linspace(self.m_min, self.m_max_plot, 1000)
         da = app[1]-app[0]
+        try:
+            jsonfile = open(self.output_events + '/checkpoint.json', 'r')
+            samps = json.load(jsonfile)
+            jsonfile.close()
+        except:
+            samps = {str(m):[] for m in app}
+        
+        # evaluates probabilities in mass space
         prob = []
         for ai in app:
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples[-self.ncheck:]])
-
-        log_draws_interp = []
-        for pr in np.array(prob).T:
-            log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
         
         # saves new samples
-        samps = samps + log_draws_interp
-        picklefile = open(self.output_events + '/checkpoint.pkl', 'wb')
-        pickle.dump(samps, picklefile)
-        picklefile.close()
+        for m, p in zip(app, prob):
+            samps[str(m)] = samps[str(m)] + p
+        jsonfile = open(self.output_events + '/checkpoint.json', 'w')
+        json.dump(samps, jsonfile)
+        jsonfile.close()
 
     def run_sampling(self):
         """

@@ -8,7 +8,7 @@ import importlib.util
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
-import pickle
+import json
 from scipy.special import logsumexp
 from scipy.spatial.distance import jensenshannon as js
 
@@ -279,8 +279,8 @@ def main():
             options.selection_function = None
     
     # Reads hyperpriors and sampling settings
-    if options.hyperpriors_ev is not None:
-        options.hyperpriors_ev = [float(x) for x in options.hyperpriors_ev.split(',')]
+    if options.prior_ev is not None:
+        options.prior_ev = [float(x) for x in options.prior_ev.split(',')]
     options.samp_settings = [int(x) for x in options.samp_settings.split(',')]
     if options.samp_settings_ev is not None:
         options.samp_settings_ev = [int(x) for x in options.samp_settings_ev.split(',')]
@@ -334,7 +334,7 @@ def main():
                               m_min = float(options.mmin),
                               m_max = float(options.mmax),
                               verbose = bool(options.verbose),
-                              diagnostic = bool(options.diagnostic)
+                              diagnostic = bool(options.diagnostic),
                               output_folder = options.output,
                               initial_cluster_number = int(options.initial_cluster_number),
                               process_events = bool(options.process_events),
@@ -347,12 +347,14 @@ def main():
     
     # Joins samples from different runs
     samples = []
-    pickle_folder = options.output + '/mass_function/'
-    pickle_files  = [pickle_folder + f for f in os.listdir(pickle_folder) if (f.startswith('posterior_functions_') or f.startswith('checkpoint'))]
+    json_folder = options.output + '/mass_function/'
+    json_files  = [json]_folder + f for f in os.listdir(json_folder) if (f.startswith('posterior_functions_') or f.startswith('checkpoint'))]
     
     for file in pickle_files:
-        openfile = open(file, 'rb')
-        for d in pickle.load(openfile):
+        openfile = open(file, 'r')
+        
+        json_dict = json.load(openfile)
+        for d in np.array(json_dict.values()).T:
             samples.append(d)
         openfile.close()
     samples_set = []
@@ -360,21 +362,27 @@ def main():
         if not s in samples_set:
             samples_set.append(s)
     
+    m = np.array([float(m) for m in json_dict.keys()])
+    
     # Saves all samples in a single file
-    picklefile = open(pickle_folder + '/all_samples.pkl', 'wb')
-    pickle.dump(samples_set, picklefile)
-    picklefile.close()
+    jsonfile = open(json_folder + '/all_samples.json', 'w')
+    json.dump(samples_set, jsonfile)
+    jsonfile.close()
+
+    # Builds interpolants
+    interp_samples = np.array([interp1d(m, p) for p in samples_set])
+
 
     # Plots median and CR (observed)
     print('{0} MF samples'.format(len(samples_set)))
     if options.selection_function is not None:
-        plot_samples(samples = samples_set, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, injected_density = inj_density, filtered_density = filtered_density, true_masses = options.true_masses)
+        plot_samples(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, injected_density = inj_density, filtered_density = filtered_density, true_masses = options.true_masses)
     else:
-        plot_samples(samples = samples_set, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, filtered_density = inj_density, true_masses = options.true_masses)
+        plot_samples(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, filtered_density = inj_density, true_masses = options.true_masses)
     
     # Plots median and CR (astrophysical)
     if options.selection_function is not None:
-        plot_astrophysical_distribution(samples = samples_set, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, sel_func = sel_func, inj_density = inj_density)
+        plot_astrophysical_distribution(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, sel_func = sel_func, inj_density = inj_density)
     
         
     
