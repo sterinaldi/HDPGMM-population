@@ -348,7 +348,7 @@ def main():
     # Joins samples from different runs
     samples = []
     json_folder = options.output + '/mass_function/'
-    json_files  = [json]_folder + f for f in os.listdir(json_folder) if (f.startswith('posterior_functions_') or f.startswith('checkpoint'))]
+    json_files  = [json_folder + f for f in os.listdir(json_folder) if (f.startswith('posterior_functions_') or f.startswith('checkpoint'))]
     
     for file in pickle_files:
         openfile = open(file, 'r')

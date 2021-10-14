@@ -833,10 +833,9 @@ class SE_Sampler:
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
         # saves interpolant functions into json file
-        jsonfile = open(self.output_posteriors + '/posterior_functions_{0}.json'.format(self.e_ID), 'w')
         j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
-        json.dump(j_dict, jsonfile)
-        jsonfile.close()
+        with open(self.output_posteriors + '/posterior_functions_{0}.json'.format(self.e_ID), 'w') as jsonfile:
+            json.dump(j_dict, jsonfile)
         
         # computes percentiles
         for perc in percentiles:
@@ -864,10 +863,9 @@ class SE_Sampler:
         np.savetxt(self.output_entropy + '/KLdiv_{0}.txt'.format(self.e_ID), np.array(ent), header = 'mean JS distance = {0}'.format(mean_ent))
         
         # saves mixture samples into json file
-        jsonfile = open(self.output_mixtures + '/posterior_functions_{0}.json'.format(self.e_ID), 'w')
         j_dict = {str(i): sample for i, sample in enumerate(self.mixture_samples)}
-        json.dump(j_dict, jsonfile)
-        jsonfile.close()
+        with open(self.output_mixtures + '/posterior_functions_{0}.json'.format(self.e_ID), 'w') as jsonfile:
+            json.dump(j_dict, jsonfile)
         
         # plots median and CR of reconstructed probability density
         self.sample_probs = prob
@@ -1404,10 +1402,10 @@ class MF_Sampler():
         while os.path.exists(fileName):
             x = x + 1
             fileName = name + str(x) + extension
-        jsonfile = open(fileName, 'w')
+        
         j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
-        json.dump(j_dict, jsonfile)
-        jsonfile.close()
+        with open(fileName, 'w') as jsonfile:
+            json.dump(j_dict, jsonfile)
         
         # computes percentiles
         for perc in percentiles:
@@ -1457,9 +1455,8 @@ class MF_Sampler():
             fileName = name + str(x) + extension
             
         j_dict = {str(i): sample for i, sample in enumerate(self.mixture_samples)}
-        jsonfile = open(fileName, 'w')
-        json.dump(j_dict, jsonfile)
-        jsonfile.close()
+        with open(fileName, 'w') as jsonfile:
+            json.dump(j_dict, jsonfile)
         
         # plots number of clusters
         fig = plt.figure()
@@ -1502,9 +1499,8 @@ class MF_Sampler():
         app  = np.linspace(self.m_min, self.m_max_plot, 1000)
         da = app[1]-app[0]
         try:
-            jsonfile = open(self.output_events + '/checkpoint.json', 'r')
-            samps = json.load(jsonfile)
-            jsonfile.close()
+            with open(self.output_events + '/checkpoint.json', 'r') as jsonfile:
+                samps = json.load(jsonfile)
         except:
             samps = {str(m):[] for m in app}
         
@@ -1517,9 +1513,8 @@ class MF_Sampler():
         # saves new samples
         for m, p in zip(app, prob):
             samps[str(m)] = samps[str(m)] + p
-        jsonfile = open(self.output_events + '/checkpoint.json', 'w')
-        json.dump(samps, jsonfile)
-        jsonfile.close()
+        with open(self.output_events + '/checkpoint.json', 'w') as jsonfile:
+            json.dump(samps, jsonfile)
 
     def run_sampling(self):
         """
