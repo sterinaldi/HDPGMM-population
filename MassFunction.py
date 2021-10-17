@@ -350,7 +350,7 @@ def main():
     json_folder = options.output + '/mass_function/'
     json_files  = [json_folder + f for f in os.listdir(json_folder) if (f.startswith('posterior_functions_') or f.startswith('checkpoint'))]
     
-    for file in pickle_files:
+    for file in json_files:
         openfile = open(file, 'r')
         
         json_dict = json.load(openfile)
