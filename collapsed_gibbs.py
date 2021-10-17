@@ -952,6 +952,7 @@ class SE_Sampler:
     
     def autocorrelation(self):
         # FIXME: autocorrelation
+        pass
     
     def convergence(self):
         dist = np.zeros(len(self.prob_draws) - 1)
@@ -1531,7 +1532,7 @@ class MF_Sampler():
             os.mkdir(self.output_events)
         self.run_sampling()
         self.postprocess()
-        if self.diagnostic()
+        if self.diagnostic:
             self.run_diagnostic()
         return
 
