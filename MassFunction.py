@@ -11,6 +11,7 @@ from matplotlib import rcParams
 import json
 from scipy.special import logsumexp
 from scipy.spatial.distance import jensenshannon as js
+from preprocessing import load_data
 
 rcParams["text.usetex"] = True
 rcParams["font.serif"] = "Computer Modern"
@@ -169,14 +170,13 @@ def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, inj
     for ai in app:
         prob.append([sample(ai) - np.log(sel_func(ai)) - n for sample, n in zip(samples, norms)])
 
-    log_draws_interp = []
-    for pr in np.array(prob).T:
-        log_draws_interp.append(interp1d(app, pr - logsumexp(pr + np.log(da))))
-    
+
     # Saves astrophysical samples
-    picklefile = open(output + '/astro_posteriors.pkl', 'wb')
-    pickle.dump(log_draws_interp, picklefile)
-    picklefile.close()
+    
+    j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
+    jsonfile = open(output + '/astro_posteriors.json', 'w')
+    json.dump(j_dict, jsonfile)
+    jsonfile.close()
     
     # Computes percentiles
     mf = {}
@@ -194,8 +194,8 @@ def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, inj
     ax  = fig.add_subplot(111)
     
     # Plots median and CR of reconstructed probability density
-    ax.fill_between(app, np.exp(mf[95]), np.exp(mf[5]), color = 'mediumturquoise', alpha = 0.5)#, label = r"\textsc{90% CI}")
-    ax.fill_between(app, np.exp(mf[84]), np.exp(mf[16]), color = 'darkturquoise', alpha = 0.5)#, label = r"\textsc{68% CI}")
+    ax.fill_between(app, np.exp(mf[95]), np.exp(mf[5]), color = 'mediumturquoise', alpha = 0.5)
+    ax.fill_between(app, np.exp(mf[84]), np.exp(mf[16]), color = 'darkturquoise', alpha = 0.5)
     ax.plot(app, np.exp(mf[50]), marker = '', color = 'steelblue', label = r"\textsc{Reconstructed (with sel. effects)}", zorder = 100)
     
     # if simulation, plots true astrophysical distribution
@@ -239,6 +239,7 @@ def main():
     parser.add_option("--inj_density", type = "string", dest = "inj_density_file", help = "Python module with injected density")
     parser.add_option("--selfunc", dest = "selection_function", help = "Python module with selection function or text file with M_i and S(M_i) for interp1d")
     parser.add_option("--true_masses", type = "string", dest = "true_masses", help = "Simulated true masses")
+    parser.add_option("--par", type = "string", dest = "par", help = "Parameter from GW posterior", default = 'm1')
     
     # Settings
     parser.add_option("--samp_settings", type = "string", dest = "samp_settings", help = "Burnin, samples and step for MF sampling", default = '10,1000,1')
@@ -249,6 +250,7 @@ def main():
     parser.add_option("-v", "--verbose", dest = "verbose", action = 'store_true', default = False, help = "Display output")
     parser.add_option("-p", "--postprocessing", dest = "postprocessing", action = 'store_true', default = False, help = "Postprocessing - requires log_rec_prob_mf.txt")
     parser.add_option("-d", "--diagnostic", dest = "diagnostic", action = 'store_true', default = False, help = "Run diagnostic routines (Autocorrelation, quasi-convergence)")
+    parser.add_option("-s", "--seed", dest = "seed", action = 'store_true', default = False, help = "Fix seed for reproducibility")
     
     # Priors
     parser.add_option("--prior_ev", type = "string", dest = "prior_ev", help = "Parameters for NIG prior (a0, V0). See https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf sec. 6 for reference", default = '1,1')
@@ -286,12 +288,7 @@ def main():
         options.samp_settings_ev = [int(x) for x in options.samp_settings_ev.split(',')]
     
     # Loads events
-    event_files = [options.events_path+'/'+f for f in os.listdir(options.events_path) if not f.startswith('.')]
-    events      = []
-    names       = []
-    for event in event_files:
-        events.append(np.genfromtxt(event))
-        names.append(event.split('/')[-1].split('.')[0])
+    events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par)
     
     # If provided, loads injected density
     inj_density = None
@@ -323,6 +320,7 @@ def main():
     
     save_options(options)
     
+    # FIXME: add seed
     # Runs the analysis
     if not bool(options.postprocessing):
         sampler = DPGMM.CGSampler(events = events,
@@ -376,13 +374,13 @@ def main():
     # Plots median and CR (observed)
     print('{0} MF samples'.format(len(samples_set)))
     if options.selection_function is not None:
-        plot_samples(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, injected_density = inj_density, filtered_density = filtered_density, true_masses = options.true_masses)
+        plot_samples(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = json_folder, injected_density = inj_density, filtered_density = filtered_density, true_masses = options.true_masses)
     else:
-        plot_samples(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, filtered_density = inj_density, true_masses = options.true_masses)
+        plot_samples(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = json_folder, filtered_density = inj_density, true_masses = options.true_masses)
     
     # Plots median and CR (astrophysical)
     if options.selection_function is not None:
-        plot_astrophysical_distribution(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = pickle_folder, sel_func = sel_func, inj_density = inj_density)
+        plot_astrophysical_distribution(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = json_folder, sel_func = sel_func, inj_density = inj_density)
     
         
     
