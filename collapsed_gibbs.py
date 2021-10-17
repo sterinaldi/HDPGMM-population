@@ -390,7 +390,8 @@ class SE_Sampler:
         :bool verbose:                  displays analysis progress status
         :double initial_cluster_number: initial guess for the number of active clusters
         :double transformed:            mass samples are already in probit space
-    
+        :bool diagnostic:               run diagnostic routines
+        
     Returns:
         :SE_Sampler: instance of SE_Sampler class
     
@@ -837,6 +838,9 @@ class SE_Sampler:
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
+        self.prob_draws = prob.T
+        self.m_vals     = app
+        
         # saves interpolant functions into json file
         j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
         with open(self.output_posteriors + '/posterior_functions_{0}.json'.format(self.e_ID), 'w') as jsonfile:
@@ -932,8 +936,36 @@ class SE_Sampler:
         if not os.path.exists(self.output_events + '/alpha/'):
             os.mkdir(self.output_events + '/alpha/')
         self.alpha_folder = self.output_events + '/alpha/'
+        if self.diagnostic:
+            if not os.path.exists(self.output_events + '/autocorrelation/'):
+                os.mkdir(self.output_events + '/autocorrelation/')
+            self.autocorrelation_folder = self.output_events + '/autocorrelation/'
+            if not os.path.exists(self.output_events + '/convergence/'):
+                os.mkdir(self.output_events + '/convergence/')
+            self.convergence_folder = self.output_events + '/convergence/'
         return
     
+    def run_diagnostic(self):
+        self.autocorrelation()
+        self.convergence()
+        return
+    
+    def autocorrelation(self):
+        # FIXME: autocorrelation
+    
+    def convergence(self):
+        dist = np.zeros(len(self.prob_draws) - 1)
+        idx  = np.arange(len(self.prob_draws) - 1)
+        for i in idx:
+            dist[i] = js(self.prob_draws[i], self.prob_draws[i+1])
+        fig_conv, ax_conv = plt.subplots()
+        ax_conv.plot(idx + 1, dist, marker = '', ls = '--')
+        ax.set_xlabel('$N$')
+        ax.set_ylabel('$D_{JS}(p_{n}, p_{n+1}$')
+        ax.grid(True,dashes=(1,3))
+        fig_conv.savefig(self.convergence_folder + '/convergence_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
+        return
+        
     def run(self):
         """
         Runs the sampler, saves samples and produces output plots.
@@ -941,6 +973,8 @@ class SE_Sampler:
         self.make_folders()
         self.run_sampling()
         self.postprocess()
+        if self.diagnostic:
+            self.run_diagnostic()
         return
 
 class MF_Sampler():
@@ -957,16 +991,17 @@ class MF_Sampler():
         :float m_max:                   mass prior upper bound for the specific event
         :float t_min:                   prior lower bound in probit space
         :float t_max:                   prior upper bound in probit space
-        :str output_folder: output folder
+        :str output_folder:             output folder
         :double initial_cluster_number: initial guess for the number of active clusters
         :function injected_density:     python function with simulated density
         :iterable true_masses:          draws from injected_density around which are drawn simulated samples
-        :double sigma_min: sigma prior lower bound
-        :double sigma_max: sigma prior upper bound
-        :double m_max_plot: upper mass limit for output plots
+        :double sigma_min:              sigma prior lower bound
+        :double sigma_max:              sigma prior upper bound
+        :double m_max_plot:             upper mass limit for output plots
         :int n_parallel_threads:        number of parallel actors to spawn
-        :int ncheck: number of draws between checkpoints
+        :int ncheck:                    number of draws between checkpoints
         :double transformed:            mass samples are already in probit space
+        :bool diagnostic:               run diagnostic routines
         
     Returns:
         :MF_Sampler: instance of CGSampler class
@@ -1154,7 +1189,7 @@ class MF_Sampler():
         # can't pickle injected density
         saved_injected_density = self.injected_density
         self.injected_density  = None
-#        with Pool(self.n_parallel_threads) as p:
+        # FIXME: ray.get()
         output = self.p.map(self.compute_score, [[data_id, cid, state] for cid in cluster_ids])
         scores = {out[0]: out[1] for out in output}
         self.numerators = {out[0]: out[2] for out in output}
@@ -1398,6 +1433,8 @@ class MF_Sampler():
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
+        self.prob_draws = prob.T
+        self.m_vals     = app
 
         # Saves interpolant functions into json file
         name = self.output_events + '/posterior_functions_mf_'
@@ -1494,6 +1531,8 @@ class MF_Sampler():
             os.mkdir(self.output_events)
         self.run_sampling()
         self.postprocess()
+        if self.diagnostic()
+            self.run_diagnostic()
         return
 
     def checkpoint(self):
@@ -1540,5 +1579,22 @@ class MF_Sampler():
         print('\n', end = '')
         return
 
+    def run_diagnostic(self):
+        self.convergence()
+        self.autocorrelation()
+        return
+    
+    def convergence(self):
+        dist = np.zeros(len(self.prob_draws) - 1)
+        idx  = np.arange(len(self.prob_draws) - 1)
+        for i in idx:
+            dist[i] = js(self.prob_draws[i], self.prob_draws[i+1])
+        fig_conv, ax_conv = plt.subplots()
+        ax_conv.plot(idx + 1, dist, marker = '', ls = '--')
+        ax.set_xlabel('$N$')
+        ax.set_ylabel('$D_{JS}(p_{n}, p_{n+1}$')
+        ax.grid(True,dashes=(1,3))
+        fig_conv.savefig(self.output_events + '/convergence_mf.pdf', bbox_inches = 'tight')
+        return
 
 
