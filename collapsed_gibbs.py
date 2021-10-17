@@ -838,7 +838,7 @@ class SE_Sampler:
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
-        self.prob_draws = prob.T
+        self.prob_draws = np.array(prob).T
         self.m_vals     = app
         
         # saves interpolant functions into json file
@@ -952,18 +952,19 @@ class SE_Sampler:
     
     def autocorrelation(self):
         # FIXME: autocorrelation
+        
         pass
     
     def convergence(self):
         dist = np.zeros(len(self.prob_draws) - 1)
         idx  = np.arange(len(self.prob_draws) - 1)
         for i in idx:
-            dist[i] = js(self.prob_draws[i], self.prob_draws[i+1])
+            dist[i] = entropy(np.exp(self.prob_draws[i]), np.exp(self.prob_draws[i+1]))
         fig_conv, ax_conv = plt.subplots()
         ax_conv.plot(idx + 1, dist, marker = '', ls = '--')
-        ax.set_xlabel('$N$')
-        ax.set_ylabel('$D_{JS}(p_{n}, p_{n+1}$')
-        ax.grid(True,dashes=(1,3))
+        ax_conv.set_xlabel('$N$')
+        ax_conv.set_ylabel('$D_{JS}(p_{n}, p_{n+1})$')
+        ax_conv.grid(True,dashes=(1,3))
         fig_conv.savefig(self.convergence_folder + '/convergence_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
         return
         
@@ -1434,7 +1435,7 @@ class MF_Sampler():
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
-        self.prob_draws = prob.T
+        self.prob_draws = np.array(prob).T
         self.m_vals     = app
 
         # Saves interpolant functions into json file
@@ -1589,11 +1590,11 @@ class MF_Sampler():
         dist = np.zeros(len(self.prob_draws) - 1)
         idx  = np.arange(len(self.prob_draws) - 1)
         for i in idx:
-            dist[i] = js(self.prob_draws[i], self.prob_draws[i+1])
+            dist[i] = entropy(np.exp(self.prob_draws[i]), np.exp(self.prob_draws[i+1]))
         fig_conv, ax_conv = plt.subplots()
-        ax_conv.plot(idx + 1, dist, marker = '', ls = '--')
-        ax.set_xlabel('$N$')
-        ax.set_ylabel('$D_{JS}(p_{n}, p_{n+1}$')
+        ax_conv.plot(idx + 1, dist, ls = '--')
+        ax_conv.set_xlabel('$N$')
+        ax_conv.set_ylabel('$D_{JS}(p_{n}, p_{n+1})$')
         ax.grid(True,dashes=(1,3))
         fig_conv.savefig(self.output_events + '/convergence_mf.pdf', bbox_inches = 'tight')
         return
