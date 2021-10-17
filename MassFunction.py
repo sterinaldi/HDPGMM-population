@@ -251,6 +251,7 @@ def main():
     parser.add_option("-p", "--postprocessing", dest = "postprocessing", action = 'store_true', default = False, help = "Postprocessing - requires log_rec_prob_mf.txt")
     parser.add_option("-d", "--diagnostic", dest = "diagnostic", action = 'store_true', default = False, help = "Run diagnostic routines (Autocorrelation, quasi-convergence)")
     parser.add_option("-s", "--seed", dest = "seed", action = 'store_true', default = False, help = "Fix seed for reproducibility")
+    parser.add_option("--n_samps_dsp", dest = "n_samples_dsp", default = -1, help = "Number of samples to analyse (downsampling). Default: all")
     
     # Priors
     parser.add_option("--prior_ev", type = "string", dest = "prior_ev", help = "Parameters for NIG prior (a0, V0). See https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf sec. 6 for reference", default = '1,1')
@@ -288,7 +289,7 @@ def main():
         options.samp_settings_ev = [int(x) for x in options.samp_settings_ev.split(',')]
     
     # Loads events
-    events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par)
+    events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp))
     
     # If provided, loads injected density
     inj_density = None
