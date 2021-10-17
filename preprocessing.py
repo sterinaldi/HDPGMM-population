@@ -54,7 +54,7 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1):
                 events.append(np.genfromtxt(event))
         else:
             events.append(unpack_gw_posterior(event, par = par, n_samples = n_samples))
-    return np.array(names), np.array(events)
+    return (np.array(events), np.array(names))
 
 def unpack_gw_posterior(event, par, n_samples = -1):
     '''
