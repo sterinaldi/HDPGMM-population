@@ -123,6 +123,7 @@ class CGSampler:
         :function injected_density:     python function with simulated density
         :iterable true_masses:          draws from injected_density around which are drawn simulated samples
         :iterable names:                str containing names to be given to single-event output files (e.g. ['GW150814', 'GW170817'])
+        :bool seed:                     fixes seed to a default value (1) for reproducibility
     
     Returns:
         :CGSampler: instance of CGSampler class
@@ -148,6 +149,7 @@ class CGSampler:
                        injected_density = None,
                        true_masses = None,
                        names = None,
+                       seed = False,
                        ):
         
         # Settings
@@ -165,6 +167,9 @@ class CGSampler:
         self.events             = events
         self.m_max_plot         = m_max
         self.event_samplers     = []
+        
+        if seed:
+            np.random.seed(seed = 1)
 
         # Priors
         self.a_ev, self.V_ev = prior_ev

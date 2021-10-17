@@ -38,7 +38,7 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1):
         :np.ndarray:    samples
     '''
     if seed:
-        np.random.seed = 1
+        np.random.seed(seed = 1)
     event_files = [path+'/'+f for f in os.listdir(path) if not f.startswith('.')]
     events = []
     names  = []
