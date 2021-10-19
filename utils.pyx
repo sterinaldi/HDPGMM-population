@@ -3,7 +3,7 @@ import numpy as np
 from libc.math cimport log, sqrt, M_PI, exp, HUGE_VAL
 cimport cython
 
-cdef double LOGSQRT2 = log(sqrt(2*M_PI))
+cdef double LOGSQRT2PI = log(sqrt(2*M_PI))
 
 """
 INTERNAL METHOD
@@ -33,7 +33,7 @@ cdef inline double _log_norm(double x, double x0, double sigma) nogil:
     Returns:
         :double: log probability
     """
-    return -((x-x0)**2)/(2*sigma*sigma) - LOGSQRT2 - log(sigma)
+    return -((x-x0)**2)/(2*sigma*sigma) - LOGSQRT2PI - log(sigma)
 
 def log_norm(double x, double x0, double sigma):
     """
