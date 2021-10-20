@@ -240,6 +240,7 @@ def main():
     parser.add_option("--selfunc", dest = "selection_function", help = "Python module with selection function or text file with M_i and S(M_i) for interp1d")
     parser.add_option("--true_masses", type = "string", dest = "true_masses", help = "Simulated true masses")
     parser.add_option("--par", type = "string", dest = "par", help = "Parameter from GW posterior", default = 'm1')
+    parser.add_option("--se_inj", type = "string", dest = "se_inj_folder", help = "Folder with injected single event posteriors (two columns file: m p)", default = None)
     
     # Settings
     parser.add_option("--samp_settings", type = "string", dest = "samp_settings", help = "Burnin, samples and step for MF sampling", default = '10,1000,1')
@@ -263,8 +264,10 @@ def main():
     (options, args) = parser.parse_args()
     
     # Converts relative paths to absolute paths
-    options.events_path = os.path.abspath(options.events_path)
-    options.output      = os.path.abspath(options.output)
+    options.events_path   = os.path.abspath(options.events_path)
+    options.output        = os.path.abspath(options.output)
+    if options.se_inj_folder is not None:
+        options.se_inj_folder = os.path.abspath(options.se_inj_folder)
     
     # If provided, reads optfile. Command-line inputs override file options.
     if options.optfile is not None:
@@ -290,6 +293,15 @@ def main():
     
     # Loads events
     events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp))
+    
+    # Loads posterior injections and saves them as interpolants
+    inj_post = {}
+    for name in names:
+        if options.se_inj_folder is not None:
+            post = np.genfromtxt(options.se_inj_folder + '/' + name + '.txt', names = True)
+            inj_post[name] = interp1d(post['m'], post['p'], bounds_error = False, fill_value = 0)
+        else:
+            inj_post[name] = None
     
     # If provided, loads injected density
     inj_density = None
@@ -341,6 +353,7 @@ def main():
                               injected_density = filtered_density,
                               true_masses = options.true_masses,
                               names = names,
+                              inj_post = inj_post
                               )
         sampler.run()
     
