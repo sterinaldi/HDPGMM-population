@@ -51,9 +51,9 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1):
                 s = int(min([n_samples, len(samples)]))
                 events.append(np.random.choice(samples, size = s, replace = False))
             else:
-                events.append(np.genfromtxt(event))
+                events.append(np.sort(np.genfromtxt(event)))
         else:
-            events.append(unpack_gw_posterior(event, par = par, n_samples = n_samples))
+            events.append(np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples)))
     return (np.array(events), np.array(names))
 
 def unpack_gw_posterior(event, par, n_samples = -1):
