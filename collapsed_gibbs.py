@@ -150,6 +150,7 @@ class CGSampler:
                        true_masses = None,
                        names = None,
                        seed = False,
+                       inj_post = None
                        ):
         
         # Settings
@@ -193,6 +194,7 @@ class CGSampler:
         self.injected_density   = injected_density
         self.true_masses        = true_masses
         self.output_recprob     = self.output_folder + '/reconstructed_events/mixtures/'
+        self.inj_post           = inj_post
         
         if names is not None:
             self.names = names
@@ -238,25 +240,27 @@ class CGSampler:
         event_samplers = []
         for i, (ev, t_ev) in enumerate(zip(self.events[marker:marker+self.n_parallel_threads], self.transformed_events[marker:marker+self.n_parallel_threads])):
             event_samplers.append(SE_Sampler.remote(
-                                            t_ev,
-                                            self.names[marker+i],
-                                            self.burnin_ev,
-                                            self.n_draws_ev,
-                                            self.step_ev,
-                                            ev,
-                                            self.alpha0,
-                                            self.a_ev,
-                                            self.V_ev,
-                                            np.min(ev),
-                                            np.max(ev),
-                                            np.min(t_ev),
-                                            np.max(t_ev),
-                                            self.m_max,
-                                            self.m_min,
-                                            self.output_folder,
-                                            self.verbose,
-                                            self.icn,
-                                            transformed = True
+                                            mass_samples  = t_ev,
+                                            event_id      = self.names[marker+i],
+                                            burnin        = self.burnin_ev,
+                                            n_draws       = self.n_draws_ev,
+                                            step          = self.step_ev,
+                                            real_masses   = ev,
+                                            alpha0        = self.alpha0,
+                                            a             = self.a_ev,
+                                            V             = self.V_ev,
+                                            m_min         = np.min(ev),
+                                            m_max         = np.max(ev),
+                                            t_min         = np.min(t_ev),
+                                            t_max         = np.max(t_ev),
+                                            glob_m_max    = self.m_max,
+                                            glob_m_min    = self.m_min,
+                                            output_folder = self.output_folder,
+                                            verbose       = self.verbose,
+                                            diagnostic    = self.diagnostic,
+                                            transformed   = True,
+                                            inj_post      = self.inj_post[self.names[marker+i]],
+                                            initial_cluster_number = self.icn,
                                             ))
         return event_samplers
         
@@ -391,6 +395,7 @@ class SE_Sampler:
         :double initial_cluster_number: initial guess for the number of active clusters
         :double transformed:            mass samples are already in probit space
         :bool diagnostic:               run diagnostic routines
+        :dict inj_post:                 injected posterior (interpolant)
         
     Returns:
         :SE_Sampler: instance of SE_Sampler class
@@ -418,7 +423,8 @@ class SE_Sampler:
                        verbose = True,
                        diagnostic = False,
                        initial_cluster_number = 5.,
-                       transformed = False
+                       transformed = False,
+                       inj_post = None
                        ):
         # New seed for each subprocess
         random.RandomState(seed = os.getpid())
@@ -466,10 +472,13 @@ class SE_Sampler:
         # Output
         self.output_folder = output_folder
         self.mixture_samples = []
-        self.n_clusters = []
+        self.n_clusters = [self.icn]
         self.verbose = verbose
         self.diagnostic = diagnostic
         self.alpha_samples = []
+        self.inj_post = inj_post
+        self.draws_z  = []
+        self.data_to_follow = [100]
         
     def transform(self, samples):
         '''
@@ -515,7 +524,16 @@ class SE_Sampler:
                 :dict 'suffstats':       mean, variance and number of samples of each active cluster
                 :list 'assignment':      list of cluster assignments (one for each sample)
         '''
-        assign = [a%int(self.icn) for a in range(len(samples))]
+#        assign = [int(a//(len(samples)/int(self.icn))) for a in range(len(samples))]
+        assign = [np.random.randint(int(self.icn)) for _ in range(len(samples))]
+#        assign = list(np.zeros(5)) + list(np.ones(5)*3) + list(np.ones(45)*2) + list(np.ones(45)*1)
+#        assign = list(np.ones(len(samples))*3)
+#        assign[0] = 0
+#        assign[1] = 0
+#        assign[2] = 1
+#        assign[3] = 1
+#        assign[4] = 2
+#        assign[5] = 2
         cluster_ids = list(np.arange(int(np.max(assign)+1)))
         samp = np.copy(samples)
         state = {
@@ -534,6 +552,7 @@ class SE_Sampler:
             'assignment': assign
             }
         self.update_suffstats(state)
+        self.draws_z.append(np.array(state['assignment']))
         return state
     
     def update_suffstats(self, state):
@@ -757,7 +776,9 @@ class SE_Sampler:
             cid = self.sample_assignment(data_id, state)
             state['assignment'][data_id] = cid
             state['suffstats'][cid] = self.add_datapoint_to_suffstats(state['data_'][data_id], state['suffstats'][cid])
+#            self.draws_z.append(np.array(state['assignment']))
         self.n_clusters.append(len(state['cluster_ids_']))
+        self.draws_z.append(np.array(state['assignment']))
     
     def sample_mixture_parameters(self, state):
         '''
@@ -838,8 +859,11 @@ class SE_Sampler:
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
-        self.prob_draws = np.array(prob).T
-        self.m_vals     = app
+        self.prob_draws         = np.exp(np.array(prob).T)
+        if self.inj_post is not None:
+            self.injected_posterior = self.inj_post(app)
+        self.dm_vals            = da
+        self.m_vals             = app
         
         # saves interpolant functions into json file
         j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
@@ -882,6 +906,8 @@ class SE_Sampler:
         
         ax.fill_between(app, p[95], p[5], color = 'mediumturquoise', alpha = 0.5)
         ax.fill_between(app, p[84], p[16], color = 'darkturquoise', alpha = 0.5)
+        if self.inj_post is not None:
+            ax.plot(app, self.injected_posterior, lw = 0.5, color = 'r', label = r"\textsc{Simulated}")
         ax.plot(app, p[50], marker = '', color = 'steelblue', label = r"\textsc{Reconstructed}", zorder = 100)
         ax.set_xlabel('$M\ [M_\\odot]$')
         ax.set_ylabel('$p(M)$')
@@ -893,7 +919,7 @@ class SE_Sampler:
         # plots number of clusters
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        ax.plot(np.arange(1,len(self.n_clusters)+1), self.n_clusters, ls = '--', marker = ',', linewidth = 0.5)
+        ax.plot(np.arange(len(self.n_clusters)), self.n_clusters, ls = '--', marker = ',', linewidth = 0.5)
         fig.savefig(self.output_n_clusters+'n_clusters_{0}.pdf'.format(self.e_ID), bbox_inches='tight')
         
         # plots concentration parameter
@@ -947,25 +973,85 @@ class SE_Sampler:
     
     def run_diagnostic(self):
         self.autocorrelation()
-        self.convergence()
+        self.convergence_z()
+        self.convergence_data()
+        if self.inj_post is not None:
+            self.convergence_true()
         return
     
+    def convergence_z(self):
+        fig_conv, ax_conv = plt.subplots()
+        for data_id in self.data_to_follow:
+            counts = []
+            for d in self.draws_z:
+                c = dict(Counter(d))
+                c[d[data_id]] = c[d[data_id]] - 1
+                counts.append(np.array([v for v in c.values()]))
+            dist = np.zeros(len(self.draws_z)-1)
+            idx  = np.arange(len(self.draws_z)-1)
+            for i in idx:
+                p1 = counts[i]
+                p2 = counts[i+1]
+                p1 = -np.sort(-p1)
+                p2 = -np.sort(-p2)
+                extra_clusters = abs(len(p1) - len(p2))
+                if len(p1) < len(p2):
+                    p1 = np.array([p1[j] if j < len(p1) else self.alpha_samples[int(i//(len(self.draws_z)/len(self.alpha_samples)))]/extra_clusters for j in range(len(p2))])
+                if len(p1) > len(p2):
+                    p2 = np.array([p2[j] if j < len(p2) else self.alpha_samples[int(i//(len(self.draws_z)/len(self.alpha_samples)))]/extra_clusters for j in range(len(p1))])
+#                p1 = np.array(list(p1) + [self.alpha_samples[int(i//(len(self.draws_z)/len(self.alpha_samples)))]])
+                p1 = p1/np.sum(p1)
+                p2 = p2/np.sum(p2)
+                ref = np.zeros(len(p1))
+                ref[0] = 1
+                dist[i] = js(p1, p2)
+            
+            ax_conv.plot(idx, dist, marker = '', ls = '--', lw = 0.5, label = str(data_id))
+        ax_conv.set_xlabel('$n$')
+        ax_conv.set_ylabel('$D_{JS}(p_{n}(z), p_{n+1}(z))$')
+        ax_conv.grid(True,dashes=(1,3))
+        ax_conv.legend(loc=0,frameon=False,fontsize=10)
+        fig_conv.savefig(self.convergence_folder + '/convergence_z_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
+            
     def autocorrelation(self):
         # FIXME: autocorrelation
         
         pass
     
-    def convergence(self):
-        dist = np.zeros(len(self.prob_draws) - 1)
-        idx  = np.arange(len(self.prob_draws) - 1)
+    def convergence_data(self):
+        dist = np.zeros(len(self.prob_draws)-1)
+        idx  = np.arange(len(self.prob_draws)-1)
         for i in idx:
-            dist[i] = entropy(np.exp(self.prob_draws[i]), np.exp(self.prob_draws[i+1]))
+            dist[i] = js(np.exp(self.prob_draws[i]), self.prob_draws[i+1])
+        avg = np.mean(dist[len(dist)//2:])
+        dev = np.std(dist[len(dist)//2:])
+        
         fig_conv, ax_conv = plt.subplots()
-        ax_conv.plot(idx + 1, dist, marker = '', ls = '--')
-        ax_conv.set_xlabel('$N$')
-        ax_conv.set_ylabel('$D_{JS}(p_{n}, p_{n+1})$')
+        ax_conv.plot(idx, np.ones(len(idx))*avg, marker = '', lw = 0.8, color = 'green')
+        ax_conv.fill_between(idx, np.ones(len(idx))*(avg-dev), np.ones(len(idx))*(avg+dev), color = 'lightgreen', alpha = 0.5)
+        ax_conv.plot(idx, dist, marker = '', ls = '--', lw = 0.5)
+        ax_conv.set_xlabel('$n$')
+        ax_conv.set_ylabel('$D_{JS}(q_{n}(M), q_{n+1}(M))$')
         ax_conv.grid(True,dashes=(1,3))
-        fig_conv.savefig(self.convergence_folder + '/convergence_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
+        fig_conv.savefig(self.convergence_folder + '/convergence_data_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
+        return
+        
+    def convergence_true(self):
+        dist = np.zeros(len(self.prob_draws))
+        idx  = np.arange(len(self.prob_draws))
+        for i in idx:
+            dist[i] = js(np.exp(self.prob_draws[i]), self.injected_posterior)
+        avg = np.mean(dist[len(dist)//2:])
+        dev = np.std(dist[len(dist)//2:])
+        
+        fig_conv, ax_conv = plt.subplots()
+        ax_conv.plot(idx, np.ones(len(idx))*avg, marker = '', lw = 0.8, color = 'green')
+        ax_conv.fill_between(idx, np.ones(len(idx))*(avg-dev), np.ones(len(idx))*(avg+dev), color = 'lightgreen', alpha = 0.5)
+        ax_conv.plot(idx, dist, marker = '', ls = '--', lw = 0.5)
+        ax_conv.set_xlabel('$n$')
+        ax_conv.set_ylabel('$D_{JS}(q_{n}(M), q_{sim}(M))$')
+        ax_conv.grid(True,dashes=(1,3))
+        fig_conv.savefig(self.convergence_folder + '/convergence_true_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
         return
         
     def run(self):
