@@ -1,6 +1,6 @@
 import numpy as np
 import os
-import collapsed_gibbs as DPGMM
+import hdpgmm.collapsed_gibbs as HDPGMM
 import optparse as op
 import configparser
 import sys
@@ -11,7 +11,7 @@ from matplotlib import rcParams
 import json
 from scipy.special import logsumexp
 from scipy.spatial.distance import jensenshannon as js
-from preprocessing import load_data
+from hdpgmm.preprocessing import load_data
 
 rcParams["text.usetex"] = True
 rcParams["font.serif"] = "Computer Modern"
