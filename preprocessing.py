@@ -34,8 +34,8 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1):
         :int n_samples: number of samples for (random) downsampling. Default -1: all samples
     
     Returns:
-        :np.ndarray:    names
         :np.ndarray:    samples
+        :np.ndarray:    names
     '''
     if seed:
         np.random.seed(seed = 1)
@@ -46,7 +46,7 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1):
         name, ext = event.split('/')[-1].split('.')
         names.append(name)
         if ext == 'txt':
-            if n_samples > 0:
+            if n_samples > -1:
                 samples = np.genfromtxt(event)
                 s = int(min([n_samples, len(samples)]))
                 events.append(np.random.choice(samples, size = s, replace = False))
@@ -84,7 +84,7 @@ def unpack_gw_posterior(event, par, n_samples = -1):
                 samples = data['redshift']
             if par == 'chi_eff':
                 samples = data['chi_eff']
-            if n_samples > 0:
+            if n_samples > -1:
                 s = int(min([n_samples, len(samples)]))
                 return np.random.choice(samples, size = s, replace = False)
             else:
@@ -114,7 +114,7 @@ def unpack_gw_posterior(event, par, n_samples = -1):
                 q    = m2/m1
                 samples = (s1*cos1 + q*s2*cos2)/(1+q)
             
-            if n_samples > 0:
+            if n_samples > -1:
                 s = int(min([n_samples, len(samples)]))
                 return np.random.choice(samples, size = s, replace = False)
             else:
