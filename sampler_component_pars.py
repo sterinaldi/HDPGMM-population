@@ -42,8 +42,8 @@ def propose_point(old_point, dm, ds):
     
     Arguments:
         :list old_point: [mean, std]
-        :double dm:      increment on mean
-        :double ds:      increment on std
+        :double dm:      maximum increment on mean
+        :double ds:      maximum increment on std
     Returns:
         :list: [proposed mean, proposed std]
     """
@@ -62,8 +62,8 @@ def sample_point(events, m_min, m_max, s_min, s_max, burnin = 1000, dm = 3, ds =
         :double sigma_min: lower bound for std
         :double sigma_max: upper bound for std
         :int burnin:       burnin for MH
-        :double dm:      increment on mean
-        :double ds:      increment on std
+        :double dm:        maximum increment on mean
+        :double ds:        maximum increment on std
     Returns:
         :double: mean
         :double: standard deviation
