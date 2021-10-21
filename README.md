@@ -14,5 +14,5 @@ If you use this code, please cite the paper https://arxiv.org/pdf/2109.05960.pdf
 
 ## Installation:
 ```bash
-  python setup.py build_ext --inplace
+  python setup.py install
 ```
