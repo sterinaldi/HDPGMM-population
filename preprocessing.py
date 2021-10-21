@@ -23,15 +23,19 @@ def RedshiftCalculation(LD, om, ol, h, zinit=0.3, limit = 0.001):
     znew = zinit - (LD_test - LD)/dLumDist(zinit,om, ol, h)
     return RedshiftCalculation(LD, om, ol, h, zinit = znew)
 
-def load_data(path, seed = False, par = 'm1', n_samples = -1):
+def load_data(path, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.315, ol = 0.685):
     '''
     Loads the data from .txt files (for simulations) or .h5/.hdf5 files (posteriors from GWTC).
+    Default cosmological parameters from Planck Collaboration (2021) https://www.aanda.org/articles/aa/pdf/2020/09/aa33910-18.pdf
     
     Arguments:
         :str path:      folder with data files
         :bool seed:     fixes the seed to a default value (1) for reproducibility
         :str par:       parameter to extract from GW posteriors (m1, m2, mc, z, chi_effective)
         :int n_samples: number of samples for (random) downsampling. Default -1: all samples
+        :double h:      Hubble constant H0/100 [km/(s*Mpc)]
+        :double om:     matter density parameter
+        :double ol:     cosmological constant density parameter
     
     Returns:
         :np.ndarray:    samples
