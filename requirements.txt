@@ -13,3 +13,4 @@ ray
 numba
 cython
 h5py
+astropy
