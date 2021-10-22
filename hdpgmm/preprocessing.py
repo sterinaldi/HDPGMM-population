@@ -1,27 +1,9 @@
 import numpy as np
 import os
 import h5py
-
-h = 0.674
-om = 0.3089
-ol = 0.6911
-
-def LumDist(z, om, ol, h):
-    return 3e3*(z + (1-om +ol)*z**2/2.)/h
-
-def dLumDist(z, om, ol, h):
-    return 3e3*(1+(1-om+ol)*z)/h
-
-def RedshiftCalculation(LD, om, ol, h, zinit=0.3, limit = 0.001):
-    '''
-    Redshift given a certain luminosity, calculated by recursion.
-    Limit is the less significative digit.
-    '''
-    LD_test = LumDist(zinit, om, ol, h)
-    if abs(LD-LD_test) < limit :
-        return zinit
-    znew = zinit - (LD_test - LD)/dLumDist(zinit,om, ol, h)
-    return RedshiftCalculation(LD, om, ol, h, zinit = znew)
+from pesummary.io import read
+from astropy.cosmology import LambdaCDM, z_at_value
+import astropy.units as u
 
 def load_data(path, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.315, ol = 0.685):
     '''
@@ -57,10 +39,10 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.
             else:
                 events.append(np.sort(np.genfromtxt(event)))
         else:
-            events.append(np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples)))
+            events.append(np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol))))
     return (np.array(events), np.array(names))
 
-def unpack_gw_posterior(event, par, n_samples = -1):
+def unpack_gw_posterior(event, par, cosmology, n_samples = -1,):
     '''
     Reads data from .h5/.hdf5 GW posterior files.
     Implemented 'm1', 'm2', 'mc', 'z', 'chi_eff'.
@@ -73,6 +55,8 @@ def unpack_gw_posterior(event, par, n_samples = -1):
     Returns:
         :np.ndarray:    samples
     '''
+    h, om, ol = cosmology
+    ap_cosmology = LambdaCDM(H0 = h*100, Om0 = om, Ode0 = ol)
     
     with h5py.File(data_folder + file, 'r') as f:
         print(file)
@@ -94,9 +78,10 @@ def unpack_gw_posterior(event, par, n_samples = -1):
             else:
                 return samples
         except:
+            
             data = f['Overall_posterior']
             LD        = data['luminosity_distance_Mpc']
-            z         = np.array([RedshiftCalculation(l, om, ol, h) for l in LD])
+            z         = np.array([z_at_value(ap_cosmology.luminosity_distance, l*u.Mpc) for l in LD])
             m1_detect = data['m1_detector_frame_Msun']
             m2_detect = data['m2_detector_frame_Msun']
             m1        = m1_detect/(1+z)
