@@ -1,7 +1,6 @@
 import numpy as np
 import os
 import h5py
-from pesummary.io import read
 from astropy.cosmology import LambdaCDM, z_at_value
 import astropy.units as u
 
