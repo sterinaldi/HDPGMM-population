@@ -336,7 +336,7 @@ def main():
     # FIXME: add seed
     # Runs the analysis
     if not bool(options.postprocessing):
-        sampler = DPGMM.CGSampler(events = events,
+        sampler = HDPGMM.CGSampler(events = events,
                               samp_settings = options.samp_settings,
                               samp_settings_ev = options.samp_settings_ev,
                               alpha0 = float(options.alpha0),
