@@ -525,6 +525,7 @@ class SE_Sampler:
                 :list 'assignment':      list of cluster assignments (one for each sample)
         '''
         assign = [int(a//(len(samples)/int(self.icn))) for a in range(len(samples))]
+#        assign = [a%self.icn for a in range(len(samples))]
 #        assign = [np.random.randint(int(self.icn)) for _ in range(len(samples))]
 #        assign = list(np.zeros(5)) + list(np.ones(5)*3) + list(np.ones(45)*2) + list(np.ones(45)*1)
 #        assign = list(np.ones(len(samples))*3)
@@ -618,6 +619,8 @@ class SE_Sampler:
         '''
         mean = (ss.mean*(ss.N)+x)/(ss.N+1)
         var  = (ss.N*(ss.var + ss.mean**2) + x**2)/(ss.N+1) - mean**2
+        if var < 0: # Numerical issue for clusters with one sample (variance = 0)
+            var = 0
         return self.SuffStat(mean, var, ss.N+1)
 
 
@@ -636,6 +639,8 @@ class SE_Sampler:
             return(self.SuffStat(0,0,0))
         mean = (ss.mean*(ss.N)-x)/(ss.N-1)
         var  = (ss.N*(ss.var + ss.mean**2) - x**2)/(ss.N-1) - mean**2
+        if var < 0:
+            var = 0
         return self.SuffStat(mean, var, ss.N-1)
     
     def cluster_assignment_distribution(self, data_id, state):
@@ -810,6 +815,7 @@ class SE_Sampler:
         Runs the sampling algorithm - Listing 1
         """
         state = self.initial_state(self.mass_samples)
+        self.sample_mixture_parameters(state)
         for i in range(self.burnin):
             if self.verbose:
                 print('\rBURN-IN: {0}/{1}'.format(i+1, self.burnin), end = '')
@@ -859,9 +865,9 @@ class SE_Sampler:
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
-        self.prob_draws         = np.exp(np.array(prob).T)
+        self.prob_draws         = np.exp(np.array(prob[1:-1]).T)
         if self.inj_post is not None:
-            self.injected_posterior = self.inj_post(app)
+            self.injected_posterior = self.inj_post(app[1:-1])
         self.dm_vals            = da
         self.m_vals             = app
         
@@ -907,7 +913,7 @@ class SE_Sampler:
         ax.fill_between(app, p[95], p[5], color = 'mediumturquoise', alpha = 0.5)
         ax.fill_between(app, p[84], p[16], color = 'darkturquoise', alpha = 0.5)
         if self.inj_post is not None:
-            ax.plot(app, self.injected_posterior, lw = 0.5, color = 'r', label = r"\textsc{Simulated}")
+            ax.plot(app, self.inj_post(app), lw = 0.5, color = 'r', label = r"\textsc{Simulated}")
         ax.plot(app, p[50], marker = '', color = 'steelblue', label = r"\textsc{Reconstructed}", zorder = 100)
         ax.set_xlabel('$M\ [M_\\odot]$')
         ax.set_ylabel('$p(M)$')
@@ -1022,7 +1028,7 @@ class SE_Sampler:
         dist = np.zeros(len(self.prob_draws)-1)
         idx  = np.arange(len(self.prob_draws)-1)
         for i in idx:
-            dist[i] = js(np.exp(self.prob_draws[i]), self.prob_draws[i+1])
+            dist[i] = js(self.prob_draws[i], self.prob_draws[i+1])
         avg = np.mean(dist[len(dist)//2:])
         dev = np.std(dist[len(dist)//2:])
         
@@ -1040,7 +1046,7 @@ class SE_Sampler:
         dist = np.zeros(len(self.prob_draws))
         idx  = np.arange(len(self.prob_draws))
         for i in idx:
-            dist[i] = js(np.exp(self.prob_draws[i]), self.injected_posterior)
+            dist[i] = js(self.prob_draws[i], self.injected_posterior)
         avg = np.mean(dist[len(dist)//2:])
         dev = np.std(dist[len(dist)//2:])
         
