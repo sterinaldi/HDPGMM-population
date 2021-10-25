@@ -4,6 +4,36 @@ import h5py
 from astropy.cosmology import LambdaCDM, z_at_value
 import astropy.units as u
 
+def load_single_event(event, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.315, ol = 0.685):
+    '''
+    Loads the data from .txt files (for simulations) or .h5/.hdf5 files (posteriors from GWTC) for a single event.
+    Default cosmological parameters from Planck Collaboration (2021) in a flat Universe (https://www.aanda.org/articles/aa/pdf/2020/09/aa33910-18.pdf)
+    
+    Arguments:
+        :str file:      file with samples
+        :bool seed:     fixes the seed to a default value (1) for reproducibility
+        :str par:       parameter to extract from GW posteriors (m1, m2, mc, z, chi_effective)
+        :int n_samples: number of samples for (random) downsampling. Default -1: all samples
+        :double h:      Hubble constant H0/100 [km/(s*Mpc)]
+        :double om:     matter density parameter
+        :double ol:     cosmological constant density parameter
+    
+    Returns:
+        :np.ndarray:    samples
+        :np.ndarray:    name
+    '''
+    name, ext = event.split('/')[-1].split('.')
+    if ext == 'txt':
+        if n_samples > -1:
+            samples = np.genfromtxt(event)
+            s = int(min([n_samples, len(samples)]))
+            out = np.sort(np.random.choice(samples, size = s, replace = False))
+        else:
+            out = np.sort(np.genfromtxt(event))
+    else:
+        out = np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol)))
+    return out, name
+
 def load_data(path, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.315, ol = 0.685):
     '''
     Loads the data from .txt files (for simulations) or .h5/.hdf5 files (posteriors from GWTC).
