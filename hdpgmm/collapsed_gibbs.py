@@ -439,7 +439,9 @@ class SE_Sampler:
                        inj_post = None,
                        seed = False,
                        var_symbol = 'M',
-                       unit       = 'M_{\\odot}'
+                       unit       = 'M_{\\odot}',
+                       sigma_max  = None,
+                       initial_assign = None,
                        ):
         if seed:
             np.random.RandomState(seed = 1)
@@ -447,19 +449,21 @@ class SE_Sampler:
             self.initial_samples = mass_samples
         else:
             self.initial_samples = real_masses
+        
+        self.initial_assign = initial_assign
         self.e_ID    = event_id
         self.burnin  = burnin
         self.n_draws = n_draws
         self.step    = step
-        self.m_min   = m_min
-        self.m_max   = m_max
+        self.m_min   = np.min([m_min, np.min(mass_samples)])
+        self.m_max   = np.max([m_max, np.max(mass_samples)])
         if glob_m_min is None:
-            self.glob_m_min = m_min
+            self.glob_m_min = self.m_min
         else:
             self.glob_m_min = glob_m_min
             
         if glob_m_max is None:
-            self.glob_m_max = m_max
+            self.glob_m_max = self.m_max
         else:
             self.glob_m_max = glob_m_max
         
@@ -472,11 +476,14 @@ class SE_Sampler:
             self.t_max        = self.transform(self.m_max)
             self.t_min        = self.transform(self.m_min)
             
-        self.sigma_max = np.std(self.mass_samples)/2.
+        if sigma_max is None:
+            self.sigma_max = np.std(self.mass_samples)/2.
+        else:
+            self.sigma_max = sigma_max
         # DP parameters
         self.alpha0 = alpha0
         # NIG prior parameters
-        self.b  = a*(np.std(self.mass_samples)/4.)**2
+        self.b  = a*(self.sigma_max/2.)**2
         self.mu = np.mean(self.mass_samples)
         self.a  = a
         self.V  = V
@@ -541,17 +548,10 @@ class SE_Sampler:
                 :dict 'suffstats':       mean, variance and number of samples of each active cluster
                 :list 'assignment':      list of cluster assignments (one for each sample)
         '''
-        assign = [int(a//(len(samples)/int(self.icn))) for a in range(len(samples))]
-#        assign = [a%self.icn for a in range(len(samples))]
-#        assign = [np.random.randint(int(self.icn)) for _ in range(len(samples))]
-#        assign = list(np.zeros(5)) + list(np.ones(5)*3) + list(np.ones(45)*2) + list(np.ones(45)*1)
-#        assign = list(np.ones(len(samples))*3)
-#        assign[0] = 0
-#        assign[1] = 0
-#        assign[2] = 1
-#        assign[3] = 1
-#        assign[4] = 2
-#        assign[5] = 2
+        if self.initial_assign is None:
+            assign = [int(a//(len(samples)/int(self.icn))) for a in range(len(samples))]
+        else:
+            assign = list(self.initial_assign)
         cluster_ids = list(np.arange(int(np.max(assign)+1)))
         samp = np.copy(samples)
         state = {
@@ -881,7 +881,6 @@ class SE_Sampler:
         for ai in app:
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
-        
         self.prob_draws         = np.exp(np.array(prob[1:-1]).T)
         if self.inj_post is not None:
             self.injected_posterior = self.inj_post(app[1:-1])
@@ -1018,8 +1017,8 @@ class SE_Sampler:
         dev = np.std(dist[len(dist)//2:])
         
         fig_conv, ax_conv = plt.subplots()
-        ax_conv.plot(idx, np.ones(len(idx))*avg, marker = '', lw = 0.8, color = 'green')
-        ax_conv.fill_between(idx, np.ones(len(idx))*(avg-dev), np.ones(len(idx))*(avg+dev), color = 'lightgreen', alpha = 0.5)
+        ax_conv.plot(idx, np.ones(len(idx))*avg, marker = '', lw = 0.5, color = 'green', alpha = 0.4)
+        ax_conv.fill_between(idx, np.ones(len(idx))*(avg-dev), np.ones(len(idx))*(avg+dev), color = 'palegreen', alpha = 0.2)
         ax_conv.plot(idx, dist, marker = '', ls = '--', lw = 0.5)
         ax_conv.set_xlabel('$n$')
         ax_conv.set_ylabel('$D_{JS}(q_{n}(M), q_{n+1}(M))$')
@@ -1036,8 +1035,8 @@ class SE_Sampler:
         dev = np.std(dist[len(dist)//2:])
         
         fig_conv, ax_conv = plt.subplots()
-        ax_conv.plot(idx, np.ones(len(idx))*avg, marker = '', lw = 0.8, color = 'green')
-        ax_conv.fill_between(idx, np.ones(len(idx))*(avg-dev), np.ones(len(idx))*(avg+dev), color = 'lightgreen', alpha = 0.5)
+        ax_conv.plot(idx, np.ones(len(idx))*avg, marker = '', lw = 0.8, color = 'green', alpha = 0.4)
+        ax_conv.fill_between(idx, np.ones(len(idx))*(avg-dev), np.ones(len(idx))*(avg+dev), color = 'palegreen', alpha = 0.2)
         ax_conv.plot(idx, dist, marker = '', ls = '--', lw = 0.5)
         ax_conv.set_xlabel('$n$')
         ax_conv.set_ylabel('$D_{JS}(q_{n}(M), q_{sim}(M))$')

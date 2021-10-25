@@ -71,6 +71,7 @@ def main():
     parser.add_option("--optfile", type = "string", dest = "optfile", help = "Options file. Passing command line options overrides optfile. It must contains ALL options")
     parser.add_option("--inj", type = "string", dest = "inj_file", help = "File with injected single event posterior (two columns file: m p)", default = None)
     parser.add_option("--par", type = "string", dest = "par", help = "Parameter from GW posterior", default = 'm1')
+    parser.add_option("--assign", type = "string", dest = "assign_file", help = "Initial guess for assignments", default = None)
     parser.add_option("--symbol", type = "string", dest = "symbol", help = "LaTeX-style quantity symbol, for plotting purposes", default = 'M')
     parser.add_option("--unit", type = "string", dest = "unit", help = "LaTeX-style quantity unit, for plotting purposes. Use '' for dimensionless quantities", default = 'M_{\\odot}')
     
@@ -86,7 +87,8 @@ def main():
     parser.add_option("--mmin", type = "float", dest = "mmin", help = "Minimum BH mass [Msun]", default = 3.)
     parser.add_option("--mmax", type = "float", dest = "mmax", help = "Maximum BH mass [Msun]", default = 120.)
     parser.add_option("--alpha", type = "float", dest = "alpha0", help = "Internal (event) initial concentration parameter", default = 1.)
-
+    parser.add_option("--sigma_max", type = "float", dest = "sigma_max", help = "Maximum std for clusters", default = None)
+    
     (options, args) = parser.parse_args()
     
     # Converts relative paths to absolute paths
@@ -94,6 +96,8 @@ def main():
     options.output     = os.path.abspath(str(options.output))
     if options.inj_file is not None:
         options.inj_file = os.path.abspath(str(options.inj_file))
+    if options.assign_file is not None:
+        options.assign_file = os.path.abspath(str(options.assign_file))
     
     # If provided, reads optfile. Command-line inputs override file options.
     if options.optfile is not None:
@@ -103,6 +107,15 @@ def main():
         for key, val in zip(vars(options).keys(), vars(options).values()):
             if not is_opt_provided(parser, key):
                 vars(options)[key] = opts[key]
+    
+    if options.inj_file == 'None':
+        options.inj_file = None
+    if options.assign_file == 'None':
+        options.assign_file = None
+    if options.sigma_max == 'None':
+        options.sigma_max = None
+    else:
+        options.sigma_max = float(options.sigma_max)
     
     # Reads hyperpriors and sampling settings
     if options.prior is not None:
@@ -118,6 +131,13 @@ def main():
         inj_post = interp1d(post['m'], post['p'], bounds_error = False, fill_value = 0)
     else:
         inj_post = None
+    
+    # Loads initial assignment, if provided
+    if options.assign_file is not None:
+        assign = np.genfromtxt(options.assign_file)
+        options.initial_cluster_number = int(np.max(assign) + 1)
+    else:
+        assign = None
     
     save_options(options)
     
@@ -143,6 +163,8 @@ def main():
                                 seed = bool(options.seed),
                                 var_symbol = options.symbol,
                                 unit = options.unit,
+                                sigma_max = options.sigma_max,
+                                initial_assign = assign,
                                 )
     pool = ActorPool([sampler])
     bin = []
