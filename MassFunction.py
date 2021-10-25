@@ -338,7 +338,6 @@ def main():
     
     save_options(options)
     
-    # FIXME: add seed
     # Runs the analysis
     if not bool(options.postprocessing):
         sampler = HDPGMM.CGSampler(events = events,
