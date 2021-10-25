@@ -22,6 +22,8 @@ def load_single_event(event, seed = False, par = 'm1', n_samples = -1, h = 0.674
         :np.ndarray:    samples
         :np.ndarray:    name
     '''
+    if seed:
+        np.random.seed(seed = 1)
     name, ext = event.split('/')[-1].split('.')
     if ext == 'txt':
         if n_samples > -1:
