@@ -353,7 +353,8 @@ def main():
                               injected_density = filtered_density,
                               true_masses = options.true_masses,
                               names = names,
-                              inj_post = inj_post
+                              inj_post = inj_post,
+                              seed = bool(options.seed)
                               )
         sampler.run()
     

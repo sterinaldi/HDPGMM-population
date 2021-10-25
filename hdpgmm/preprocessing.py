@@ -23,7 +23,7 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.
         :np.ndarray:    names
     '''
     if seed:
-        np.random.seed(seed = 1)
+        np.random.RandomState(seed = 1)
     event_files = [path+'/'+f for f in os.listdir(path) if not f.startswith('.')]
     events = []
     names  = []
@@ -34,7 +34,7 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.
             if n_samples > -1:
                 samples = np.genfromtxt(event)
                 s = int(min([n_samples, len(samples)]))
-                events.append(np.random.choice(samples, size = s, replace = False))
+                events.append(np.sort(np.random.choice(samples, size = s, replace = False)))
             else:
                 events.append(np.sort(np.genfromtxt(event)))
         else:

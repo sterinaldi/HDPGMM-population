@@ -170,8 +170,9 @@ class CGSampler:
         self.event_samplers     = []
         
         if seed:
-            np.random.seed(seed = 1)
-
+            np.random.RandomState(seed = 1)
+        self.seed = seed
+        
         # Priors
         self.a_ev, self.V_ev = prior_ev
         sample_min           = np.min([np.min(a) for a in self.events])
@@ -259,6 +260,7 @@ class CGSampler:
                                             verbose       = self.verbose,
                                             diagnostic    = self.diagnostic,
                                             transformed   = True,
+                                            seed          = self.seed,
                                             inj_post      = self.inj_post[self.names[marker+i]],
                                             initial_cluster_number = self.icn,
                                             ))
@@ -316,24 +318,26 @@ class CGSampler:
         if not os.path.exists(self.mf_folder):
             os.mkdir(self.mf_folder)
         flattened_transf_ev = np.array([x for ev in self.transformed_events for x in ev])
-        sampler = MF_Sampler(self.posterior_functions_events,
-                       self.burnin_mf,
-                       self.n_draws_mf,
-                       self.step_mf,
-                       alpha0 = self.gamma0,
-                       m_min = self.m_min,
-                       m_max = self.m_max,
-                       t_min = self.t_min,
-                       t_max = self.t_max,
-                       output_folder = self.mf_folder,
-                       initial_cluster_number = min([self.icn, len(self.posterior_functions_events)]),
-                       injected_density = self.injected_density,
-                       true_masses = self.true_masses,
-                       sigma_min = np.std(flattened_transf_ev)/16.,
-                       sigma_max = np.std(flattened_transf_ev)/3.,
-                       m_max_plot = self.m_max_plot,
-                       n_parallel_threads = self.n_parallel_threads,
-                       transformed = True
+        sampler = MF_Sampler(
+                       posterior_functions_events = self.posterior_functions_events,
+                       burnin                     = self.burnin_mf,
+                       n_draws                    = self.n_draws_mf,
+                       step                       = self.step_mf,
+                       alpha0                     = self.gamma0,
+                       m_min                      = self.m_min,
+                       m_max                      = self.m_max,
+                       t_min                      = self.t_min,
+                       t_max                      = self.t_max,
+                       output_folder              = self.mf_folder,
+                       injected_density           = self.injected_density,
+                       true_masses                = self.true_masses,
+                       sigma_min                  = np.std(flattened_transf_ev)/16.,
+                       sigma_max                  = np.std(flattened_transf_ev)/3.,
+                       m_max_plot                 = self.m_max_plot,
+                       n_parallel_threads         = self.n_parallel_threads,
+                       transformed                = True,
+                       seed                       = self.seed,
+                       initial_cluster_number     = min([self.icn, len(self.posterior_functions_events)]),
                        )
         sampler.run()
     
@@ -424,10 +428,11 @@ class SE_Sampler:
                        diagnostic = False,
                        initial_cluster_number = 5.,
                        transformed = False,
-                       inj_post = None
+                       inj_post = None,
+                       seed = False,
                        ):
-        # New seed for each subprocess
-        random.RandomState(seed = os.getpid())
+        if seed:
+            np.random.RandomState(seed = 1)
         if real_masses is None:
             self.initial_samples = mass_samples
         else:
@@ -979,46 +984,11 @@ class SE_Sampler:
     
     def run_diagnostic(self):
         self.autocorrelation()
-        self.convergence_z()
         self.convergence_data()
         if self.inj_post is not None:
             self.convergence_true()
         return
-    
-    def convergence_z(self):
-        fig_conv, ax_conv = plt.subplots()
-        for data_id in self.data_to_follow:
-            counts = []
-            for d in self.draws_z:
-                c = dict(Counter(d))
-                c[d[data_id]] = c[d[data_id]] - 1
-                counts.append(np.array([v for v in c.values()]))
-            dist = np.zeros(len(self.draws_z)-1)
-            idx  = np.arange(len(self.draws_z)-1)
-            for i in idx:
-                p1 = counts[i]
-                p2 = counts[i+1]
-                p1 = -np.sort(-p1)
-                p2 = -np.sort(-p2)
-                extra_clusters = abs(len(p1) - len(p2))
-                if len(p1) < len(p2):
-                    p1 = np.array([p1[j] if j < len(p1) else self.alpha_samples[int(i//(len(self.draws_z)/len(self.alpha_samples)))]/extra_clusters for j in range(len(p2))])
-                if len(p1) > len(p2):
-                    p2 = np.array([p2[j] if j < len(p2) else self.alpha_samples[int(i//(len(self.draws_z)/len(self.alpha_samples)))]/extra_clusters for j in range(len(p1))])
-#                p1 = np.array(list(p1) + [self.alpha_samples[int(i//(len(self.draws_z)/len(self.alpha_samples)))]])
-                p1 = p1/np.sum(p1)
-                p2 = p2/np.sum(p2)
-                ref = np.zeros(len(p1))
-                ref[0] = 1
-                dist[i] = js(p1, p2)
-            
-            ax_conv.plot(idx, dist, marker = '', ls = '--', lw = 0.5, label = str(data_id))
-        ax_conv.set_xlabel('$n$')
-        ax_conv.set_ylabel('$D_{JS}(p_{n}(z), p_{n+1}(z))$')
-        ax_conv.grid(True,dashes=(1,3))
-        ax_conv.legend(loc=0,frameon=False,fontsize=10)
-        fig_conv.savefig(self.convergence_folder + '/convergence_z_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
-            
+
     def autocorrelation(self):
         # FIXME: autocorrelation
         
@@ -1125,8 +1095,12 @@ class MF_Sampler():
                        ncheck = 5,
                        transformed = False,
                        diagnostic = False,
+                       seed = False,
                        ):
-                       
+        
+        if seed:
+            np.random.RandomState(seed = 1)
+            
         self.burnin  = burnin
         self.n_draws = n_draws
         self.step    = step
