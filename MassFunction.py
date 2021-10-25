@@ -58,7 +58,7 @@ def log_normal_density(x, x0, sigma):
     """
     return (-(x-x0)**2/(2*sigma**2))-np.log(np.sqrt(2*np.pi)*sigma)
 
-def plot_samples(samples, m_min, m_max, output, injected_density = None, filtered_density = None, true_masses = None):
+def plot_samples(samples, m_min, m_max, output, symbol, unit, injected_density = None, filtered_density = None, true_masses = None):
     """
     Plots the inferred distribution and saves draws.
     
@@ -140,14 +140,14 @@ def plot_samples(samples, m_min, m_max, output, injected_density = None, filtere
     # Maquillage
     ax.grid(True,dashes=(1,3))
     ax.legend(loc=0,frameon=False,fontsize=10)
-    ax.set_xlabel('$M\ [M_\\odot]$')
-    ax.set_ylabel('$p(M)$')
+    ax.set_xlabel('${0}\ [{1}]$'.format(symbol, unit))
+    ax.set_ylabel('$p({0})$'.format(symbol))
     plt.savefig(output + '/joint_mass_function.pdf', bbox_inches = 'tight')
     ax.set_yscale('log')
     ax.set_ylim(np.min(p[50]))
     plt.savefig(output + '/log_joint_mass_function.pdf', bbox_inches = 'tight')
 
-def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, inj_density = None):
+def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, symbol, unit, inj_density = None):
     """
     Plots the inferred astrophysical distribution and saves draws.
     
@@ -205,8 +205,11 @@ def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, inj
     
     # Maquillage
     ax.set_ylim(np.min(np.exp(mf[50])))
-    ax.set_xlabel('$M\ [M_\\odot]$')
-    ax.set_ylabel('$p(M)$')
+    if not unit == '':
+        ax.set_xlabel('${0}\ [{1}]$'.format(symbol, unit))
+    else:
+        ax.set_xlabel('${0}$'.format(symbol))
+    ax.set_ylabel('$p({0})$'.format(symbol))
     ax.grid(True,dashes=(1,3))
     ax.legend(loc=0,frameon=False,fontsize=10)
     plt.savefig(output + '/mass_function.pdf', bbox_inches = 'tight')
@@ -241,6 +244,8 @@ def main():
     parser.add_option("--true_masses", type = "string", dest = "true_masses", help = "Simulated true masses")
     parser.add_option("--par", type = "string", dest = "par", help = "Parameter from GW posterior", default = 'm1')
     parser.add_option("--se_inj", type = "string", dest = "se_inj_folder", help = "Folder with injected single event posteriors (two columns file: m p)", default = None)
+    parser.add_option("--symbol", type = "string", dest = "symbol", help = "LaTeX-style quantity symbol, for plotting purposes", default = 'M')
+    parser.add_option("--unit", type = "string", dest = "unit", help = "LaTeX-style quantity unit, for plotting purposes. Use '' for dimensionless quantities", default = 'M_{\\odot}')
     
     # Settings
     parser.add_option("--samp_settings", type = "string", dest = "samp_settings", help = "Burnin, samples and step for MF sampling", default = '10,1000,1')
@@ -354,7 +359,9 @@ def main():
                               true_masses = options.true_masses,
                               names = names,
                               inj_post = inj_post,
-                              seed = bool(options.seed)
+                              seed = bool(options.seed),
+                              var_symbol = options.symbol,
+                              unit = options.unit,
                               )
         sampler.run()
     
@@ -389,13 +396,13 @@ def main():
     # Plots median and CR (observed)
     print('{0} MF samples'.format(len(samples_set)))
     if options.selection_function is not None:
-        plot_samples(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = json_folder, injected_density = inj_density, filtered_density = filtered_density, true_masses = options.true_masses)
+        plot_samples(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = json_folder, injected_density = inj_density, filtered_density = filtered_density, true_masses = options.true_masses, symbol = options.symbol, unit = options.unit)
     else:
-        plot_samples(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = json_folder, filtered_density = inj_density, true_masses = options.true_masses)
+        plot_samples(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = json_folder, filtered_density = inj_density, true_masses = options.true_masses, symbol = options.symbol, unit = options.unit)
     
     # Plots median and CR (astrophysical)
     if options.selection_function is not None:
-        plot_astrophysical_distribution(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = json_folder, sel_func = sel_func, inj_density = inj_density)
+        plot_astrophysical_distribution(samples = interp_samples, m_min = float(options.mmin), m_max = float(options.mmax), output = json_folder, sel_func = sel_func, inj_density = inj_density, symbol = options.symbol, unit = options.unit)
     
         
     

@@ -150,7 +150,9 @@ class CGSampler:
                        true_masses = None,
                        names = None,
                        seed = False,
-                       inj_post = None
+                       inj_post = None,
+                       var_symbol = 'M',
+                       unit = 'M_{\\odot}'
                        ):
         
         # Settings
@@ -196,6 +198,8 @@ class CGSampler:
         self.true_masses        = true_masses
         self.output_recprob     = self.output_folder + '/reconstructed_events/mixtures/'
         self.inj_post           = inj_post
+        self.var_symbol         = var_symbol
+        self.unit               = unit
         
         if names is not None:
             self.names = names
@@ -262,6 +266,8 @@ class CGSampler:
                                             transformed   = True,
                                             seed          = self.seed,
                                             inj_post      = self.inj_post[self.names[marker+i]],
+                                            var_symbol    = self.var_symbol,
+                                            unit          = self.unit,
                                             initial_cluster_number = self.icn,
                                             ))
         return event_samplers
@@ -338,6 +344,8 @@ class CGSampler:
                        transformed                = True,
                        seed                       = self.seed,
                        initial_cluster_number     = min([self.icn, len(self.posterior_functions_events)]),
+                       var_symbol                 = self.var_symbol,
+                       unit                       = self.unit,
                        )
         sampler.run()
     
@@ -430,6 +438,8 @@ class SE_Sampler:
                        transformed = False,
                        inj_post = None,
                        seed = False,
+                       var_symbol = 'M',
+                       unit       = 'M_{\\odot}'
                        ):
         if seed:
             np.random.RandomState(seed = 1)
@@ -484,6 +494,8 @@ class SE_Sampler:
         self.inj_post = inj_post
         self.draws_z  = []
         self.data_to_follow = [100]
+        self.var_symbol = var_symbol
+        self.unit = unit
         
     def transform(self, samples):
         '''
@@ -920,8 +932,11 @@ class SE_Sampler:
         if self.inj_post is not None:
             ax.plot(app, self.inj_post(app), lw = 0.5, color = 'r', label = r"\textsc{Simulated}")
         ax.plot(app, p[50], marker = '', color = 'steelblue', label = r"\textsc{Reconstructed}", zorder = 100)
-        ax.set_xlabel('$M\ [M_\\odot]$')
-        ax.set_ylabel('$p(M)$')
+        if not self.unit == '':
+            ax.set_xlabel('${0}\ [{1}]$'.format(self.var_symbol, self.unit))
+        else:
+            ax.set_xlabel('${0}$'.format(self.var_symbol))
+        ax.set_ylabel('$p({0})$'.format(self.var_symbol))
         ax.set_xlim(lower_bound, upper_bound)
         ax.grid(True,dashes=(1,3))
         ax.legend(loc=0,frameon=False,fontsize=10)
@@ -1096,6 +1111,8 @@ class MF_Sampler():
                        transformed = False,
                        diagnostic = False,
                        seed = False,
+                       var_symbol = 'M',
+                       unit = 'M_{\\odot}'
                        ):
         
         if seed:
@@ -1132,6 +1149,8 @@ class MF_Sampler():
         self.alpha_samples = []
         self.ncheck = ncheck
         self.diagnostic = diagnostic
+        self.var_symbol = var_symbol
+        self.unit = unit
         
         self.p = Pool(n_parallel_threads)
         
@@ -1545,8 +1564,11 @@ class MF_Sampler():
             norm = np.sum([self.injected_density(a)*(app[1]-app[0]) for a in app])
             density = np.array([self.injected_density(a)/norm for a in app])
             ax.plot(app, density, color = 'k', marker = '', linewidth = 0.8, label = r"\textsc{Simulated - Observed}")
-        ax.set_xlabel('$M\ [M_\\odot]$')
-        ax.set_ylabel('$p(M)$')
+        if not self.unit == '':
+            ax.set_xlabel('${0}\ [{1}]$'.format(self.var_symbol, self.unit))
+        else:
+            ax.set_xlabel('${0}$'.format(self.var_symbol))
+        ax.set_ylabel('$p({0})$'.format(self.var_symbol))
         ax.set_xlim(self.m_min*1.1, self.m_max_plot)
         ax.grid(True,dashes=(1,3))
         ax.legend(loc=0,frameon=False,fontsize=10)
