@@ -12,6 +12,8 @@ import json
 from scipy.special import logsumexp
 from scipy.spatial.distance import jensenshannon as js
 from hdpgmm.preprocessing import load_single_event
+import ray
+from ray.util import ActorPool
 
 rcParams["text.usetex"] = True
 rcParams["font.serif"] = "Computer Modern"
@@ -37,6 +39,26 @@ def save_options(options):
         logfile.write('{0}: {1}\n'.format(key,val))
     logfile.close()
 
+def is_opt_provided (parser, dest):
+    """
+    Checks if an option is provided by the user
+    
+    Arguments:
+        :obj parser: an instance of optparse.OptionParser with the user-provided options
+        :str dest:   name of the option
+    Returns:
+        :bool: True if the option is provided, false otherwise
+    """
+    for opt in parser._get_all_options():
+        try:
+            if opt.dest == dest and (opt._long_opts[0] in sys.argv[1:] or opt._short_opts[0] in sys.argv[1:]):
+                return True
+        except:
+            if opt.dest == dest and opt._long_opts[0] in sys.argv[1:]:
+                return True
+    return False
+
+
 def main():
     '''
     Runs the analysis
@@ -48,11 +70,12 @@ def main():
     parser.add_option("-o", "--output", type = "string", dest = "output", help = "Output folder")
     parser.add_option("--optfile", type = "string", dest = "optfile", help = "Options file. Passing command line options overrides optfile. It must contains ALL options")
     parser.add_option("--inj", type = "string", dest = "inj_file", help = "File with injected single event posterior (two columns file: m p)", default = None)
+    parser.add_option("--par", type = "string", dest = "par", help = "Parameter from GW posterior", default = 'm1')
     parser.add_option("--symbol", type = "string", dest = "symbol", help = "LaTeX-style quantity symbol, for plotting purposes", default = 'M')
     parser.add_option("--unit", type = "string", dest = "unit", help = "LaTeX-style quantity unit, for plotting purposes. Use '' for dimensionless quantities", default = 'M_{\\odot}')
     
     # Settings
-    parser.add_option("--samp_settings", type = "string", dest = "samp_settings_ev", help = "Burnin, samples and step for single event sampling", default = 10,1000,1)
+    parser.add_option("--samp_settings", type = "string", dest = "samp_settings", help = "Burnin, samples and step", default = '10,1000,1')
     parser.add_option("--icn", dest = "initial_cluster_number", type = "float", help = "Initial cluster number", default = 5.)
     parser.add_option("-d", "--diagnostic", dest = "diagnostic", action = 'store_true', default = False, help = "Run diagnostic routines (Autocorrelation, quasi-convergence)")
     parser.add_option("-s", "--seed", dest = "seed", action = 'store_true', default = False, help = "Fix seed for reproducibility")
@@ -63,15 +86,14 @@ def main():
     parser.add_option("--mmin", type = "float", dest = "mmin", help = "Minimum BH mass [Msun]", default = 3.)
     parser.add_option("--mmax", type = "float", dest = "mmax", help = "Maximum BH mass [Msun]", default = 120.)
     parser.add_option("--alpha", type = "float", dest = "alpha0", help = "Internal (event) initial concentration parameter", default = 1.)
-    parser.add_option("--gamma", type = "float", dest = "gamma0", help = "External (MF) initial concentration parameter", default = 1.)
 
     (options, args) = parser.parse_args()
     
     # Converts relative paths to absolute paths
-    options.event_file = os.path.abspath(options.event_file)
-    options.output     = os.path.abspath(options.output)
+    options.event_file = os.path.abspath(str(options.event_file))
+    options.output     = os.path.abspath(str(options.output))
     if options.inj_file is not None:
-        options.inj_file = os.path.abspath(options.inj_file)
+        options.inj_file = os.path.abspath(str(options.inj_file))
     
     # If provided, reads optfile. Command-line inputs override file options.
     if options.optfile is not None:
@@ -92,14 +114,17 @@ def main():
     
     # Loads posterior injections and saves them as interpolants
     if options.inj_file is not None:
-        post = np.genfromtxt(options.inj_file + '/' + name + '.txt', names = True)
+        post = np.genfromtxt(options.inj_file, names = True)
         inj_post = interp1d(post['m'], post['p'], bounds_error = False, fill_value = 0)
     else:
         inj_post = None
     
     save_options(options)
     
-    sampler = HDPGMM.SE_sampler(mass_samples = event,
+    ray.init(num_cpus = 1)
+    
+    sampler = HDPGMM.SE_Sampler.remote(
+                                mass_samples = event,
                                 event_id     = name,
                                 burnin = int(options.burnin),
                                 n_draws = int(options.n_draws),
@@ -119,7 +144,10 @@ def main():
                                 var_symbol = options.symbol,
                                 unit = options.unit,
                                 )
-    sampler.run()
+    pool = ActorPool([sampler])
+    bin = []
+    for s in pool.map(lambda a, v: a.run.remote(), range(1)):
+        bin.append(s)
 
 if __name__=='__main__':
     main()
