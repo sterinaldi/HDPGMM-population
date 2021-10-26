@@ -172,7 +172,10 @@ class CGSampler:
         self.event_samplers     = []
         
         if seed:
-            np.random.RandomState(seed = 1)
+            self.rdstate = np.random.RandomState(seed = 1)
+        else:
+            self.rdstate = np.random.RandomState()
+            
         self.seed = seed
         
         # Priors
@@ -444,7 +447,9 @@ class SE_Sampler:
                        initial_assign = None,
                        ):
         if seed:
-            np.random.RandomState(seed = 1)
+            self.rdstate = np.random.RandomState(seed = 1)
+        else:
+            self.rdstate = np.random.RandomState()
         if real_masses is None:
             self.initial_samples = mass_samples
         else:
@@ -752,7 +757,7 @@ class SE_Sampler:
         """
         scores = self.cluster_assignment_distribution(data_id, state).items()
         labels, scores = zip(*scores)
-        cid = random.RandomState().choice(labels, p=scores)
+        cid = self.rdstate.choice(labels, p=scores)
         if cid == "new":
             return self.create_cluster(state)
         else:
@@ -773,7 +778,7 @@ class SE_Sampler:
         n     = state['Ntot']
         K     = len(state['cluster_ids_'])
         for _ in range(burnin):
-            a_new = a_old + random.RandomState().uniform(-1,1)*0.5
+            a_new = a_old + self.rdstate.uniform(-1,1)*0.5
             if a_new > 0:
                 logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
                 logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
@@ -811,7 +816,7 @@ class SE_Sampler:
         '''
         ss = state['suffstats']
         alpha = [ss[cid].N + state['alpha_'] / state['num_clusters_'] for cid in state['cluster_ids_']]
-        weights = random.RandomState().dirichlet(alpha).flatten()
+        weights = self.rdstate.dirichlet(alpha).flatten()
         components = {}
         for i, cid in enumerate(state['cluster_ids_']):
             mean = ss[cid].mean
@@ -822,8 +827,8 @@ class SE_Sampler:
             b_n  = state['hyperparameters_']["b"] + (state['hyperparameters_']["mu"]**2/state['hyperparameters_']["V"] + (sigma + mean**2)*N - mu_n**2/V_n)/2.
             a_n  = state['hyperparameters_']["a"] + N/2.
             # Update t-parameters
-            s = stats.invgamma(a_n, scale = b_n).rvs()
-            m = stats.norm(mu_n, s*V_n).rvs()
+            s = stats.invgamma(a_n, scale = b_n).rvs(random_state = self.rdstate)
+            m = stats.norm(mu_n, s*V_n).rvs(random_state = self.rdstate)
             components[i] = {'mean': m, 'sigma': np.sqrt(s), 'weight': weights[i]}
         self.mixture_samples.append(components)
     
@@ -1115,7 +1120,11 @@ class MF_Sampler():
                        ):
         
         if seed:
-            np.random.RandomState(seed = 1)
+            self.rdstate = np.random.RandomState(seed = 1)
+        else:
+            self.rdstate = np.random.RandomState()
+        
+        self.seed = seed
             
         self.burnin  = burnin
         self.n_draws = n_draws
@@ -1441,7 +1450,7 @@ class MF_Sampler():
         n     = state['Ntot']
         K     = len(state['cluster_ids_'])
         for _ in range(burnin):
-            a_new = a_old + random.RandomState().uniform(-1,1)*0.5
+            a_new = a_old + self.rdstate.uniform(-1,1)*0.5
             if a_new > 0:
                 logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
                 logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
@@ -1476,11 +1485,11 @@ class MF_Sampler():
             :dict state: current state
         '''
         alpha = [len(state['ev_in_cl'][cid]) + state['alpha_'] / state['num_clusters_'] for cid in state['cluster_ids_']]
-        weights = stats.dirichlet(alpha).rvs(size=1).flatten()
+        weights = self.rdstate.dirichlet(alpha).flatten()
         components = {}
         for i, cid in enumerate(state['cluster_ids_']):
             events = [self.posterior_draws[j] for j in state['ev_in_cl'][cid]]
-            m, s = sample_point(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max, burnin = 1000)
+            m, s = sample_point(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max, burnin = 1000, seed = self.seed)
             components[i] = {'mean': m, 'sigma': s, 'weight': weights[i]}
         self.mixture_samples.append(components)
     

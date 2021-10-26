@@ -36,7 +36,7 @@ def log_posterior(mu, sigma, events, sigma_min, sigma_max, m_min, m_max):
     events_sum = np.sum([logsumexp([np.log(component['weight']) + log_norm(mu, component['mean'], sigma) for component in ev.values()]) for ev in events]) - np.log(sigma)
     return events_sum
 
-def propose_point(old_point, dm, ds):
+def propose_point(old_point, dm, ds, rdstate):
     """
     Draw a new proposed point for MH sampling scheme
     
@@ -47,11 +47,11 @@ def propose_point(old_point, dm, ds):
     Returns:
         :list: [proposed mean, proposed std]
     """
-    m = old_point[0] + uniform(-1,1)*dm
-    s = old_point[1] + uniform(-1,1)*ds
+    m = old_point[0] + rdstate.uniform(-1,1)*dm
+    s = old_point[1] + rdstate.uniform(-1,1)*ds
     return [m,s]
 
-def sample_point(events, m_min, m_max, s_min, s_max, burnin = 1000, dm = 3, ds = 1):
+def sample_point(events, m_min, m_max, s_min, s_max, burnin = 1000, dm = 3, ds = 1, seed = False):
     """
     Draws mean and standard deviation for a mixture component using a Metropolis-Hastings sampling scheme.
     
@@ -68,11 +68,15 @@ def sample_point(events, m_min, m_max, s_min, s_max, burnin = 1000, dm = 3, ds =
         :double: mean
         :double: standard deviation
     """
+    if seed:
+        rdstate = np.random.RandomState(seed = 1)
+    else:
+        rdstate = np.random.RandomState()
     old_point = [uniform(m_min, m_max), uniform(s_min, s_max)]
     for _ in range(burnin):
-        new_point = propose_point(old_point, dm, ds)
+        new_point = propose_point(old_point, dm, ds, rdstate)
         log_new = log_posterior(new_point[0], new_point[1], events, s_min, s_max, m_min, m_max)
         log_old = log_posterior(old_point[0], old_point[1], events, s_min, s_max, m_min, m_max)
-        if log_new - log_old > np.log(uniform(0,1)):
+        if log_new - log_old > np.log(rdstate.uniform(0,1)):
             old_point = new_point
     return old_point[0], old_point[1]
