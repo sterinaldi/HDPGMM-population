@@ -462,6 +462,8 @@ class SE_Sampler:
         self.step    = step
         self.m_min   = np.min([m_min, np.min(mass_samples)])
         self.m_max   = np.max([m_max, np.max(mass_samples)])
+        self.m_min_plot = m_min
+        self.m_max_plot = m_max
         if glob_m_min is None:
             self.glob_m_min = self.m_min
         else:
@@ -837,7 +839,8 @@ class SE_Sampler:
         Runs the sampling algorithm - Listing 1
         """
         state = self.initial_state(self.mass_samples)
-        self.sample_mixture_parameters(state)
+        if self.diagnostic:
+            self.sample_mixture_parameters(state)
         for i in range(self.burnin):
             if self.verbose:
                 print('\rBURN-IN: {0}/{1}'.format(i+1, self.burnin), end = '')
@@ -941,10 +944,12 @@ class SE_Sampler:
         else:
             ax.set_xlabel('${0}$'.format(self.var_symbol))
         ax.set_ylabel('$p({0})$'.format(self.var_symbol))
-        ax.set_xlim(lower_bound, upper_bound)
+        ax.set_xlim(self.m_min_plot, self.m_max_plot)
         ax.grid(True,dashes=(1,3))
         ax.legend(loc=0,frameon=False,fontsize=10)
         plt.savefig(self.output_pltevents + '/{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
+        ax.set_yscale('log')
+        plt.savefig(self.output_pltevents + '/log_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
         
         # plots number of clusters
         fig = plt.figure()
@@ -1141,7 +1146,8 @@ class MF_Sampler():
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.posterior_functions_events = posterior_functions_events
-        self.m_max_plot = m_max_plot
+        self.m_min_plot = m_min
+        self.m_max_plot = m_max
         # DP parameters
         self.alpha0 = alpha0
         # Miscellanea
@@ -1577,7 +1583,7 @@ class MF_Sampler():
         else:
             ax.set_xlabel('${0}$'.format(self.var_symbol))
         ax.set_ylabel('$p({0})$'.format(self.var_symbol))
-        ax.set_xlim(self.m_min*1.1, self.m_max_plot)
+        ax.set_xlim(self.m_min_plot, self.m_max_plot)
         ax.grid(True,dashes=(1,3))
         ax.legend(loc=0,frameon=False,fontsize=10)
         plt.savefig(self.output_events + '/obs_mass_function.pdf', bbox_inches = 'tight')
