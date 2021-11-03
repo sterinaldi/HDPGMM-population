@@ -889,11 +889,11 @@ class SE_Sampler:
         for ai in app:
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
-        self.prob_draws         = np.exp(np.array(prob[1:-1]).T)
+        self.prob_draws = np.exp(np.array(prob[2:-2]).T)
         if self.inj_post is not None:
-            self.injected_posterior = self.inj_post(app[1:-1])
-        self.dm_vals            = da
-        self.m_vals             = app
+            self.injected_posterior = self.inj_post(app[2:-2])
+        self.dm_vals = da
+        self.m_vals  = app
         
         # saves interpolant functions into json file
         j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
@@ -1022,7 +1022,9 @@ class SE_Sampler:
         dist = np.zeros(len(self.prob_draws)-1)
         idx  = np.arange(len(self.prob_draws)-1)
         for i in idx:
-            dist[i] = js(self.prob_draws[i], self.prob_draws[i+1])
+            qn   = self.prob_draws[i][np.where([pi > 0 for pi in self.prob_draws[i+1]])]
+            qnp1 = self.prob_draws[i+1][np.where([pi > 0 for pi in self.prob_draws[i+1]])]
+            dist[i] = js(qn, qnp1)
         avg = np.mean(dist[len(dist)//2:])
         dev = np.std(dist[len(dist)//2:])
         
@@ -1043,7 +1045,6 @@ class SE_Sampler:
             dist[i] = js(self.prob_draws[i], self.injected_posterior)
         avg = np.mean(dist[len(dist)//2:])
         dev = np.std(dist[len(dist)//2:])
-        
         fig_conv, ax_conv = plt.subplots()
         ax_conv.plot(idx, np.ones(len(idx))*avg, marker = '', lw = 0.8, color = 'green', alpha = 0.4)
         ax_conv.fill_between(idx, np.ones(len(idx))*(avg-dev), np.ones(len(idx))*(avg+dev), color = 'palegreen', alpha = 0.2)
