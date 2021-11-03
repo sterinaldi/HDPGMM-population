@@ -128,7 +128,7 @@ def main():
     # Loads posterior injections and saves them as interpolants
     if options.inj_file is not None:
         post = np.genfromtxt(options.inj_file, names = True)
-        inj_post = interp1d(post['m'], post['p'], bounds_error = False, fill_value = 0)
+        inj_post = interp1d(post['m'], post['p'], bounds_error = False, fill_value = (post['p'][0],post['p'][-1]))
     else:
         inj_post = None
     

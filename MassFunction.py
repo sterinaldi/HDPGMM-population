@@ -304,7 +304,7 @@ def main():
     for name in names:
         if options.se_inj_folder is not None:
             post = np.genfromtxt(options.se_inj_folder + '/' + name + '.txt', names = True)
-            inj_post[name] = interp1d(post['m'], post['p'], bounds_error = False, fill_value = 0)
+            inj_post[name] = interp1d(post['m'], post['p'], bounds_error = False, fill_value = (post['p'][0], post['p'][-1]))
         else:
             inj_post[name] = None
     
