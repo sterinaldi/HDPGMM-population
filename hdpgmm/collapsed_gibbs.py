@@ -22,7 +22,7 @@ import ray
 from ray.util import ActorPool
 from ray.util.multiprocessing import Pool
 
-from utils import integrand, compute_norm_const, log_norm
+from utils import integrand, compute_norm_const, log_norm, compute_autocorrelation
 
 from matplotlib import rcParams
 from numba import jit, njit
@@ -907,6 +907,8 @@ class SE_Sampler:
         for perc in percentiles:
             p[perc] = p[perc] - normalisation
         
+        self.median_posterior = np.array(p[50])
+        
         # Saves median and CR
         names = ['m'] + [str(perc) for perc in percentiles]
         np.savetxt(self.output_recprob + '/log_rec_prob_{0}.txt'.format(self.e_ID), np.array([app, p[5], p[16], p[50], p[84], p[95]]).T, header = ' '.join(names))
@@ -1014,14 +1016,23 @@ class SE_Sampler:
         return
 
     def autocorrelation(self):
-        # FIXME: autocorrelation
-        
+        C = compute_autocorrelation(self.prob_draws, self.median_posterior)
+        fig_ac, ax_ac = plt.subplots()
+        ax_ac.plot(np.arange(len(C)), C, ls = '--', marker = '', lw = 0.5)
+        ax_ac.set_xlabel('$\\tau$')
+        ax_ac.set_ylabel('$C(\\tau)$')
+        ax_ac.grid(True,dashes=(1,3))
+        fig_ac.savefig(self.autocorrelation_folder + '/autocorrelation_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
         pass
     
     def convergence_data(self):
         dist = np.zeros(len(self.prob_draws)-1)
         idx  = np.arange(len(self.prob_draws)-1)
         for i in idx:
+            '''
+            Scipy's implementation of JS distance requires scipy.special.rel_entr, which returns inf if one of the entries of qnp1 is 0.
+            This is to cure this issue.
+            '''
             qn   = self.prob_draws[i][np.where([pi > 0 for pi in self.prob_draws[i+1]])]
             qnp1 = self.prob_draws[i+1][np.where([pi > 0 for pi in self.prob_draws[i+1]])]
             dist[i] = js(qn, qnp1)
