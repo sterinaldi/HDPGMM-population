@@ -129,7 +129,7 @@ def main():
     options.h, options.om, options.ol = (float(x) for x in options.cosmology.split(','))
     
     # Loads event
-    event, name = load_single_event(event = options.event_file, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol))
+    event, name = load_single_event(event = options.event_file, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
     
     # Loads posterior injections and saves them as interpolants
     if options.inj_file is not None:
