@@ -265,6 +265,9 @@ def main():
     parser.add_option("--mmax", type = "float", dest = "mmax", help = "Maximum BH mass [Msun]", default = 120.)
     parser.add_option("--alpha", type = "float", dest = "alpha0", help = "Internal (event) initial concentration parameter", default = 1.)
     parser.add_option("--gamma", type = "float", dest = "gamma0", help = "External (MF) initial concentration parameter", default = 1.)
+    
+    # Others
+    parser.add_option("--cosmology", type = "string", dest = "cosmology", help = "Cosmological parameters (h, om, ol). Default values from Planck (2021)", default = '0.674,0.315,0.685')
 
     (options, args) = parser.parse_args()
     
@@ -296,8 +299,11 @@ def main():
     if options.samp_settings_ev is not None:
         options.samp_settings_ev = [int(x) for x in options.samp_settings_ev.split(',')]
     
+    # Read cosmology
+    options.h, options.om, options.ol = (float(x) for x in options.cosmology.split(','))
+    
     # Loads events
-    events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp))
+    events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
     
     # Loads posterior injections and saves them as interpolants
     inj_post = {}

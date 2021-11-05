@@ -89,6 +89,9 @@ def main():
     parser.add_option("--alpha", type = "float", dest = "alpha0", help = "Internal (event) initial concentration parameter", default = 1.)
     parser.add_option("--sigma_max", type = "float", dest = "sigma_max", help = "Maximum std for clusters", default = None)
     
+    # Others
+    parser.add_option("--cosmology", type = "string", dest = "cosmology", help = "Cosmological parameters (h, om, ol). Default values from Planck (2021)", default = '0.674,0.315,0.685')
+    
     (options, args) = parser.parse_args()
     
     # Converts relative paths to absolute paths
@@ -121,9 +124,12 @@ def main():
     if options.prior is not None:
         options.a, options.V = [float(x) for x in options.prior.split(',')]
     options.burnin, options.n_draws, options.step = (int(x) for x in options.samp_settings.split(','))
-
+    
+    # Read cosmology
+    options.h, options.om, options.ol = (float(x) for x in options.cosmology.split(','))
+    
     # Loads event
-    event, name = load_single_event(event = options.event_file, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp))
+    event, name = load_single_event(event = options.event_file, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol))
     
     # Loads posterior injections and saves them as interpolants
     if options.inj_file is not None:
