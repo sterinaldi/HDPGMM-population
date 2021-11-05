@@ -10,7 +10,6 @@ If you use this code, please cite the paper https://arxiv.org/pdf/2109.05960.pdf
 * Matplotlib
 * Numba
 * Ray
-* CPNest (https://github.com/johnveitch/cpnest - for multidim only)
 
 ## Installation:
 ```bash
