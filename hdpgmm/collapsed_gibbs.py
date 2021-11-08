@@ -22,8 +22,7 @@ import ray
 from ray.util import ActorPool
 from ray.util.multiprocessing import Pool
 
-from utils import integrand, compute_norm_const, log_norm, compute_autocorrelation
-
+from hdpgmm.utils import integrand, compute_norm_const, log_norm
 from matplotlib import rcParams
 from numba import jit, njit
 from numba.extending import get_cython_function_address
@@ -889,11 +888,11 @@ class SE_Sampler:
         for ai in app:
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
-        self.prob_draws = np.exp(np.array(prob[2:-2]).T)
+        self.prob_draws = np.exp(np.ascontiguousarray(np.array(prob).T))
         if self.inj_post is not None:
-            self.injected_posterior = self.inj_post(app[2:-2])
+            self.injected_posterior = self.inj_post(app)
         self.dm_vals = da
-        self.m_vals  = app
+        self.m_vals  = np.ascontiguousarray(app)
         
         # saves interpolant functions into json file
         j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
@@ -903,11 +902,9 @@ class SE_Sampler:
         # computes percentiles
         for perc in percentiles:
             p[perc] = np.percentile(prob, perc, axis = 1)
-        normalisation = logsumexp(p[50] + np.log(da))
+        normalisation = logsumexp(p[50])
         for perc in percentiles:
             p[perc] = p[perc] - normalisation
-        
-        self.median_posterior = np.array(p[50])
         
         # Saves median and CR
         names = ['m'] + [str(perc) for perc in percentiles]
@@ -1014,9 +1011,21 @@ class SE_Sampler:
         if self.inj_post is not None:
             self.convergence_true()
         return
-
+    
+    def compute_autocorrelation(self):
+        mean = np.mean(self.prob_draws, axis = 0)
+        taumax = self.prob_draws.shape[0]//2
+        autocorrelation = np.zeros(taumax)
+        n_draws = self.prob_draws.shape[0]
+        N = np.mean([np.sum((self.prob_draws[i] - mean)*(self.prob_draws[i] - mean))*self.dm_vals for i in range(n_draws)])
+        
+        for tau in range(taumax):
+            autocorrelation[tau] = np.mean([np.sum((self.prob_draws[i] - mean)*(self.prob_draws[(i+tau)%n_draws] - mean))*self.dm_vals for i in range(n_draws)])/N
+        
+        return autocorrelation
+    
     def autocorrelation(self):
-        C = compute_autocorrelation(self.prob_draws, self.median_posterior)
+        C = self.compute_autocorrelation()
         fig_ac, ax_ac = plt.subplots()
         ax_ac.plot(np.arange(len(C)), C, ls = '--', marker = '', lw = 0.5)
         ax_ac.set_xlabel('$\\tau$')
