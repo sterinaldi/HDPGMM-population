@@ -100,6 +100,20 @@ def natural_keys(text):
     '''
     return [ atoi(c) for c in re.split(r'(\d+)', text) ]
 
+def my_student_t(df, t):
+    '''
+    Student-t log pdf
+    
+    Arguments:
+        :float df: degrees of freedom
+        :float t:  variable
+        
+    Returns:
+        :float: student_t(df).logpdf(t)
+    '''
+    lnB = numba_gammaln(0.5)+ numba_gammaln(0.5*df) - numba_gammaln(0.5 + 0.5*df)
+    return -0.5*np.log(df*np.pi) - lnB - ((df+1)*0.5)*np.log1p(t*t/df)
+
 class CGSampler:
     '''
     Class to analyse a set of mass posterior samples and reconstruct the mass distribution.
@@ -368,21 +382,6 @@ class CGSampler:
         print('Elapsed time: {0}h {1}m {2}s'.format(h, m, s))
         return
         
-
-def my_student_t(df, t):
-    '''
-    Student-t log pdf
-    
-    Arguments:
-        :float df: degrees of freedom
-        :float t:  variable
-        
-    Returns:
-        :float: student_t(df).logpdf(t)
-    '''
-    lnB = numba_gammaln(0.5)+ numba_gammaln(0.5*df) - numba_gammaln(0.5 + 0.5*df)
-    return -0.5*np.log(df*np.pi) - lnB - ((df+1)*0.5)*np.log1p(t*t/df)
-    
 @ray.remote
 class SE_Sampler:
     '''
