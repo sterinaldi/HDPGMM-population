@@ -803,7 +803,6 @@ class SE_Sampler:
             cid = self.sample_assignment(data_id, state)
             state['assignment'][data_id] = cid
             state['suffstats'][cid] = self.add_datapoint_to_suffstats(state['data_'][data_id], state['suffstats'][cid])
-#            self.draws_z.append(np.array(state['assignment']))
         self.n_clusters.append(len(state['cluster_ids_']))
         self.draws_z.append(np.array(state['assignment']))
     
