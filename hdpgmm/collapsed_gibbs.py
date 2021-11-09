@@ -900,7 +900,7 @@ class SE_Sampler:
         # computes percentiles
         for perc in percentiles:
             p[perc] = np.percentile(prob, perc, axis = 1)
-        normalisation = logsumexp(p[50])
+        normalisation = logsumexp(p[50] + np.log(da))
         for perc in percentiles:
             p[perc] = p[perc] - normalisation
         
