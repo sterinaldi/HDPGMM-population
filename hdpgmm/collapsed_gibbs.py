@@ -1553,8 +1553,11 @@ class MF_Sampler():
             a = self.transform(ai)
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
-        self.prob_draws = np.array(prob).T
-        self.m_vals     = app
+        self.prob_draws = np.exp(np.ascontiguousarray(np.array(prob).T))
+        if self.inj_post is not None:
+            self.injected_density_eval = self.injected_density(app)
+        self.dm_vals = da
+        self.m_vals  = np.ascontiguousarray(app)
 
         # Saves interpolant functions into json file
         name = self.output_events + '/posterior_functions_mf_'
@@ -1703,21 +1706,73 @@ class MF_Sampler():
         return
 
     def run_diagnostic(self):
-        self.convergence()
         self.autocorrelation()
+        self.convergence_data()
+        if self.injected_density is not None:
+            self.convergence_true()
         return
     
-    def convergence(self):
-        dist = np.zeros(len(self.prob_draws) - 1)
-        idx  = np.arange(len(self.prob_draws) - 1)
+    def compute_autocorrelation(self):
+        mean = np.mean(self.prob_draws, axis = 0)
+        taumax = self.prob_draws.shape[0]//2
+        autocorrelation = np.zeros(taumax)
+        n_draws = self.prob_draws.shape[0]
+        N = np.mean([np.sum((self.prob_draws[i] - mean)*(self.prob_draws[i] - mean))*self.dm_vals for i in range(n_draws)])
+        
+        for tau in range(taumax):
+            autocorrelation[tau] = np.mean([np.sum((self.prob_draws[i] - mean)*(self.prob_draws[(i+tau)%n_draws] - mean))*self.dm_vals for i in range(n_draws)])/N
+        
+        return autocorrelation
+    
+    def autocorrelation(self):
+        C = self.compute_autocorrelation()
+        fig_ac, ax_ac = plt.subplots()
+        ax_ac.plot(np.arange(len(C)), C, ls = '--', marker = '', lw = 0.5)
+        ax_ac.set_xlabel('$\\tau$')
+        ax_ac.set_ylabel('$C(\\tau)$')
+        ax_ac.grid(True,dashes=(1,3))
+        fig_ac.savefig(self.output_events + '/autocorrelation_mf.pdf', bbox_inches = 'tight')
+        pass
+    
+    def convergence_data(self):
+        dist = np.zeros(len(self.prob_draws)-1)
+        idx  = np.arange(len(self.prob_draws)-1)
         for i in idx:
-            dist[i] = entropy(np.exp(self.prob_draws[i]), np.exp(self.prob_draws[i+1]))
+            '''
+            Scipy's implementation of JS distance requires scipy.special.rel_entr, which returns inf if one of the entries of qnp1 is 0.
+            This is to cure this issue.
+            '''
+            qn   = self.prob_draws[i][np.where([pi > 0 for pi in self.prob_draws[i+1]])]
+            qnp1 = self.prob_draws[i+1][np.where([pi > 0 for pi in self.prob_draws[i+1]])]
+            dist[i] = js(qn, qnp1)
+        avg = np.mean(dist[len(dist)//2:])
+        dev = np.std(dist[len(dist)//2:])
+        
         fig_conv, ax_conv = plt.subplots()
-        ax_conv.plot(idx + 1, dist, ls = '--')
-        ax_conv.set_xlabel('$N$')
-        ax_conv.set_ylabel('$D_{JS}(p_{n}, p_{n+1})$')
-        ax.grid(True,dashes=(1,3))
-        fig_conv.savefig(self.output_events + '/convergence_mf.pdf', bbox_inches = 'tight')
+        ax_conv.plot(idx, np.ones(len(idx))*avg, marker = '', lw = 0.5, color = 'green', alpha = 0.4)
+        ax_conv.fill_between(idx, np.ones(len(idx))*(avg-dev), np.ones(len(idx))*(avg+dev), color = 'palegreen', alpha = 0.2)
+        ax_conv.plot(idx, dist, marker = '', ls = '--', lw = 0.5)
+        ax_conv.set_xlabel('$n$')
+        ax_conv.set_ylabel('$D_{JS}(q_{n}(M), q_{n+1}(M))$')
+        ax_conv.grid(True,dashes=(1,3))
+        fig_conv.savefig(self.output_events + '/convergence_data_mf.pdf', bbox_inches = 'tight')
         return
-
+        
+    def convergence_true(self):
+        dist = np.zeros(len(self.prob_draws))
+        idx  = np.arange(len(self.prob_draws))
+        for i in idx:
+            dist[i] = js(self.prob_draws[i], self.injected_density_eval)
+        avg = np.mean(dist[len(dist)//2:])
+        dev = np.std(dist[len(dist)//2:])
+        fig_conv, ax_conv = plt.subplots()
+        ax_conv.plot(idx, np.ones(len(idx))*avg, marker = '', lw = 0.8, color = 'green', alpha = 0.4)
+        ax_conv.fill_between(idx, np.ones(len(idx))*(avg-dev), np.ones(len(idx))*(avg+dev), color = 'palegreen', alpha = 0.2)
+        ax_conv.plot(idx, dist, marker = '', ls = '--', lw = 0.5)
+        ax_conv.set_xlabel('$n$')
+        ax_conv.set_ylabel('$D_{JS}(q_{n}(M), q_{sim}(M))$')
+        ax_conv.grid(True,dashes=(1,3))
+        fig_conv.savefig(self.output_events + '/convergence_true_mf.pdf', bbox_inches = 'tight')
+        return
+        
 
