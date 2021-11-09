@@ -1030,7 +1030,7 @@ class SE_Sampler:
         ax_ac.set_ylabel('$C(\\tau)$')
         ax_ac.grid(True,dashes=(1,3))
         fig_ac.savefig(self.autocorrelation_folder + '/autocorrelation_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
-        pass
+        return
     
     def convergence_data(self):
         dist = np.zeros(len(self.prob_draws)-1)
@@ -1732,7 +1732,7 @@ class MF_Sampler():
         ax_ac.set_ylabel('$C(\\tau)$')
         ax_ac.grid(True,dashes=(1,3))
         fig_ac.savefig(self.output_events + '/autocorrelation_mf.pdf', bbox_inches = 'tight')
-        pass
+        return
     
     def convergence_data(self):
         dist = np.zeros(len(self.prob_draws)-1)
