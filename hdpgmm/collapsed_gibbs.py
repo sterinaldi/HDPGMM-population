@@ -22,7 +22,7 @@ import ray
 from ray.util import ActorPool
 from ray.util.multiprocessing import Pool
 
-from hdpgmm.utils import integrand, compute_norm_const, log_norm
+from hdpgmm.utils import integrand, compute_uflow_const, log_norm
 from matplotlib import rcParams
 from numba import jit, njit
 from numba.extending import get_cython_function_address
@@ -1289,9 +1289,9 @@ class MF_Sampler():
         Returns:
             :double: log predictive likelihood
         """
-        logN_cnst = compute_norm_const(0, 1, events) + np.log(t_max - t_min) + np.log(sigma_max - sigma_min)
-        I, dI = dblquad(integrand, t_min, t_max, gfun = sigma_min, hfun = sigma_max, args = [events, logN_cnst])
-        return np.log(I) + logN_cnst
+        logU = compute_uflow_const(0, 1, events) + np.log(t_max - t_min) + np.log(sigma_max - sigma_min)
+        I, dI = dblquad(integrand, t_min, t_max, gfun = sigma_min, hfun = sigma_max, args = [events, logU])
+        return np.log(I) + logU
     
     def cluster_assignment_distribution(self, data_id, state):
         """

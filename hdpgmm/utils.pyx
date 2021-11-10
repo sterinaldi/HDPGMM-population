@@ -130,7 +130,7 @@ def integrand(double sigma,double mu, list events, double logN_cnst):
 @cython.wraparound(False)
 @cython.nonecheck(False)
 @cython.cdivision(True)
-cdef double _compute_norm_const(double mu, double sigma, list events):
+cdef double _compute_uflow_const(double mu, double sigma, list events):
     """
     INTERNAL METHOD
     Compute normalisation constant to avoid underflow while integrating.
@@ -148,7 +148,7 @@ cdef double _compute_norm_const(double mu, double sigma, list events):
         logprob += _log_prob_mixture(mu, sigma, ev)
     return logprob
 
-def compute_norm_const(double mu, double sigma, list events):
+def compute_uflow_const(double mu, double sigma, list events):
     """
     Compute normalisation constant to avoid underflow while integrating.
     
@@ -159,4 +159,4 @@ def compute_norm_const(double mu, double sigma, list events):
     Returns:
         :double: normalisation constant
     """
-    return _compute_norm_const(mu, sigma, events)
+    return _compute_uflow_const(mu, sigma, events)
