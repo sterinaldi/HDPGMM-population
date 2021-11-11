@@ -362,6 +362,7 @@ class CGSampler:
                        initial_cluster_number     = min([self.icn, len(self.posterior_functions_events)]),
                        var_symbol                 = self.var_symbol,
                        unit                       = self.unit,
+                       diagnostic                 = self.diagnostic,
                        )
         sampler.run()
     
@@ -458,8 +459,8 @@ class SE_Sampler:
         self.burnin  = burnin
         self.n_draws = n_draws
         self.step    = step
-        self.m_min   = np.min([m_min, np.min(mass_samples)])
-        self.m_max   = np.max([m_max, np.max(mass_samples)])
+        self.m_min   = np.min([m_min, np.min(real_masses)])
+        self.m_max   = np.max([m_max, np.max(real_masses)])
         self.m_min_plot = m_min
         self.m_max_plot = m_max
         if glob_m_min is None:
@@ -869,13 +870,12 @@ class SE_Sampler:
         Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
         """
         # mass values
-        lower_bound = max([self.m_min-1, self.glob_m_min])
-        upper_bound = min([self.m_max+1, self.glob_m_max])
+        lower_bound = max([self.m_min, self.glob_m_min])
+        upper_bound = min([self.m_max, self.glob_m_max])
         app  = np.linspace(lower_bound, upper_bound, 1000)
         da   = app[1]-app[0]
         percentiles = [5,16, 50, 84, 95]
         p = {}
-        
         # plots samples histogram
         fig = plt.figure()
         ax  = fig.add_subplot(111)
@@ -1185,7 +1185,8 @@ class MF_Sampler():
         self.var_symbol = var_symbol
         self.unit = unit
         
-        self.p = Pool(n_parallel_threads)
+        ray.init(ignore_reinit_error=True, num_cpus = n_parallel_threads)
+        self.p = ActorPool([ScoreComputer.remote(self.t_min, self.t_max, self.sigma_min, self.sigma_max) for _ in range(n_parallel_threads)])
         
     def transform(self, samples):
         '''
@@ -1252,29 +1253,6 @@ class MF_Sampler():
             state['logL_D'][cid] = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max)
         state['logL_D']["new"] = self.log_numerical_predictive([], self.t_min, self.t_max, self.sigma_min, self.sigma_max)
         return state
-    
-    def log_predictive_likelihood(self, data_id, cluster_id, state):
-        '''
-        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster - part of Eq. (2.39)
-        
-        Arguments:
-            :int data_id:    index of the considered sample
-            :int cluster_id: index of the considered cluster
-            :dict state:     current state
-        
-        Returns:
-            :double: log Likelihood
-        '''
-        if cluster_id == "new":
-            events = []
-            return -np.log(self.t_max-self.t_min), -np.log(self.t_max-self.t_min)
-        else:
-            events = [self.posterior_draws[i] for i in state['ev_in_cl'][cluster_id]]
-        n = len(events)
-        events.append(self.posterior_draws[data_id])
-        logL_D = state['logL_D'][cluster_id] #denominator
-        logL_N = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max) #numerator
-        return logL_N - logL_D, logL_N
 
     def log_numerical_predictive(self, events, t_min, t_max, sigma_min, sigma_max):
         """"
@@ -1309,58 +1287,15 @@ class MF_Sampler():
         # can't pickle injected density
         saved_injected_density = self.injected_density
         self.injected_density  = None
-        # FIXME: ray.get()
-        output = self.p.map(self.compute_score, [[data_id, cid, state] for cid in cluster_ids])
-        scores = {out[0]: out[1] for out in output}
-        self.numerators = {out[0]: out[2] for out in output}
+        output = self.p.map(lambda a, v: a.compute_score.remote(v), [[data_id, cid, state, self.posterior_draws] for cid in cluster_ids])
+        scores = {}
+        for out in output:
+            scores[out[0]] = out[1]
+            self.numerators[out[0]] = out[2]
         self.injected_density = saved_injected_density
         normalization = 1/sum(scores.values())
         scores = {cid: score*normalization for cid, score in scores.items()}
         return scores
-        
-    def compute_score(self, args):
-        """
-        Wrapper for log_predictive_likelihood and log_cluster_assign_score
-        (parallelized with Ray)
-        
-        Arguments:
-            :list args: list of arguments. Contains:
-                args[0]: sample index
-                args[1]: cluster index
-                args[2]: current state
-        Returns:
-            :list: list of computed values. Entries are:
-                ret[0]: cluster index
-                ret[1]: p_i for the considered cluster
-                ret[2]: log Likelihood
-        """
-        data_id = args[0]
-        cid     = args[1]
-        state   = args[2]
-        score, logL_N = self.log_predictive_likelihood(data_id, cid, state)
-        score += self.log_cluster_assign_score(cid, state)
-        score = np.exp(score)
-        return [cid, score, logL_N]
-        
-        
-    def log_cluster_assign_score(self, cluster_id, state):
-        """
-        Log-likelihood that a new point generated will
-        be assigned to cluster_id given the current state. Eqs. (2.26) and (2.27)
-        
-        Arguments:
-            :int cluster_id: index of the considered cluster
-            :dict state:     current state
-        
-        Returns:
-            :double: log Likelihood
-        """
-        if cluster_id == "new":
-            return np.log(state["alpha_"])
-        else:
-            if len(state['ev_in_cl'][cluster_id]) == 0:
-                return -np.inf
-            return np.log(len(state['ev_in_cl'][cluster_id]))
 
     def create_cluster(self, state):
         '''
@@ -1539,7 +1474,6 @@ class MF_Sampler():
         percentiles = [50, 5,16, 84, 95]
         p = {}
         fig = plt.figure()
-        fig.suptitle('Observed mass function')
         ax  = fig.add_subplot(111)
         
         # if provided (simulation) plots true masses histogram
@@ -1554,7 +1488,7 @@ class MF_Sampler():
             prob.append([logsumexp([log_norm(a, component['mean'], component['sigma']) for component in sample.values()], b = [component['weight'] for component in sample.values()]) - log_norm(a, 0, 1) for sample in self.mixture_samples])
         
         self.prob_draws = np.exp(np.ascontiguousarray(np.array(prob).T))
-        if self.inj_post is not None:
+        if self.injected_density is not None:
             self.injected_density_eval = self.injected_density(app)
         self.dm_vals = da
         self.m_vals  = np.ascontiguousarray(app)
@@ -1640,12 +1574,12 @@ class MF_Sampler():
         
         # if simulation, computes Jensen-Shannon distance
         if self.injected_density is not None:
-            ent = [js(np.exp(s(app)), density) for s in log_draws_interp]
+            ent = [js(np.exp(s), density) for s in np.array(prob).T]
             JSD = {}
             for perc in percentiles:
                 JSD[perc] = np.percentile(ent, perc, axis = 0)
             print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]))
-            np.savetxt(output + '/JSD.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
+            np.savetxt(self.output_events + '/JSD.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
         
     
     def run(self):
@@ -1775,4 +1709,97 @@ class MF_Sampler():
         fig_conv.savefig(self.output_events + '/convergence_true_mf.pdf', bbox_inches = 'tight')
         return
         
+@ray.remote
+class ScoreComputer:
+    def __init__(self, t_min, t_max, sigma_min, sigma_max):
+        self.t_min     = t_min
+        self.t_max     = t_max
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+        
+    def compute_score(self, args):
+        """
+        Wrapper for log_predictive_likelihood and log_cluster_assign_score
+        (parallelized with Ray)
+        
+        Arguments:
+            :list args: list of arguments. Contains:
+                args[0]: sample index
+                args[1]: cluster index
+                args[2]: current state
+                args[3]: posterior draws (list)
+                args[4]: bounds (tuple (t_min, t_max, sigma_min, sigma_max))
+        Returns:
+            :list: list of computed values. Entries are:
+                ret[0]: cluster index
+                ret[1]: p_i for the considered cluster
+                ret[2]: log Likelihood
+        """
+        data_id = args[0]
+        cid     = args[1]
+        state   = args[2]
+        posterior_draws = args[3]
+        score, logL_N = self.log_predictive_likelihood(data_id, cid, state, posterior_draws)
+        score += self.log_cluster_assign_score(cid, state)
+        score = np.exp(score)
+        return [cid, score, logL_N]
+
+    def log_cluster_assign_score(self, cluster_id, state):
+        """
+        Log-likelihood that a new point generated will
+        be assigned to cluster_id given the current state. Eqs. (2.26) and (2.27)
+        
+        Arguments:
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
+        """
+        if cluster_id == "new":
+            return np.log(state["alpha_"])
+        else:
+            if len(state['ev_in_cl'][cluster_id]) == 0:
+                return -np.inf
+            return np.log(len(state['ev_in_cl'][cluster_id]))
+
+    def log_predictive_likelihood(self, data_id, cluster_id, state, posterior_draws):
+        '''
+        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster - part of Eq. (2.39)
+        
+        Arguments:
+            :int data_id:    index of the considered sample
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
+        '''
+        if cluster_id == "new":
+            events = []
+            return -np.log(self.t_max-self.t_min), -np.log(self.t_max-self.t_min)
+        else:
+            events = [posterior_draws[i] for i in state['ev_in_cl'][cluster_id]]
+        n = len(events)
+        events.append(posterior_draws[data_id])
+        logL_D = state['logL_D'][cluster_id] #denominator
+        logL_N = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max) #numerator
+        return logL_N - logL_D, logL_N
+
+    def log_numerical_predictive(self, events, t_min, t_max, sigma_min, sigma_max):
+        """"
+        Computes integral over cluster parameters (mean and std) in Eq. (2.39)
+        Normalization constant is required to avoid underflow while working with a high number of events.
+        Arguments:
+            :list events:      single event posterior distributions associated with the cluster
+            :double t_min:     lower bound of mean parameter uniform prior
+            :double t_max:     upper bound of mean parameter uniform prior
+            :double sigma_min: lower bound of sigma parameter uniform prior
+            :double sigma_max: upper bound of sigma parameter uniform prior
+        Returns:
+            :double: log predictive likelihood
+        """
+        logU = compute_uflow_const(0, 1, events) + np.log(t_max - t_min) + np.log(sigma_max - sigma_min)
+        I, dI = dblquad(integrand, t_min, t_max, gfun = sigma_min, hfun = sigma_max, args = [events, logU])
+        return np.log(I) + logU
 
