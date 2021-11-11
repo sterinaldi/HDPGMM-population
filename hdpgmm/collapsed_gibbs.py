@@ -505,8 +505,6 @@ class SE_Sampler:
         self.diagnostic = diagnostic
         self.alpha_samples = []
         self.inj_post = inj_post
-        self.draws_z  = []
-        self.data_to_follow = [100]
         self.var_symbol = var_symbol
         self.unit = unit
         
@@ -576,7 +574,6 @@ class SE_Sampler:
             'assignment': assign
             }
         self.update_suffstats(state)
-        self.draws_z.append(np.array(state['assignment']))
         return state
     
     def update_suffstats(self, state):
@@ -805,7 +802,6 @@ class SE_Sampler:
             state['assignment'][data_id] = cid
             state['suffstats'][cid] = self.add_datapoint_to_suffstats(state['data_'][data_id], state['suffstats'][cid])
         self.n_clusters.append(len(state['cluster_ids_']))
-        self.draws_z.append(np.array(state['assignment']))
     
     def sample_mixture_parameters(self, state):
         '''
