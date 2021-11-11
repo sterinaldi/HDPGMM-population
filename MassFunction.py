@@ -120,7 +120,7 @@ def plot_samples(samples, m_min, m_max, output, symbol, unit, injected_density =
         JSD = {}
         for perc in percentiles:
             JSD[perc] = np.percentile(ent, perc, axis = 0)
-        print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]))
+        print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(*np.round((JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]), decimals = 3)))
         np.savetxt(output + '/joint_JSD.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
     
     # as above, accounting for selection effects (observed distribution)
@@ -134,7 +134,7 @@ def plot_samples(samples, m_min, m_max, output, symbol, unit, injected_density =
         JSD = {}
         for perc in percentiles:
             JSD[perc] = np.percentile(ent, perc)
-        print('Jensen-Shannon distance: {0}+{1}-{2} nats (filtered)'.format(JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]))
+        print('Jensen-Shannon distance: {0}+{1}-{2} nats (filtered)'.format(*np.round((JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]), decimals = 3)))
         np.savetxt(output + '/filtered_joint_relative_entropy.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
     
     # Maquillage
@@ -375,23 +375,22 @@ def main():
     json_folder = options.output + '/mass_function/'
     json_files  = [json_folder + f for f in os.listdir(json_folder) if (f.startswith('posterior_functions_') or f.startswith('checkpoint'))]
     
+    samples_set = []
     for file in json_files:
         openfile = open(file, 'r')
-        
         json_dict = json.load(openfile)
-        for d in np.array(json_dict.values()).T:
-            samples.append(d)
+        samples = np.array([np.array(d) for d in json_dict.values()]).T
         openfile.close()
-    samples_set = []
-    for s in samples:
-        if not s in samples_set:
+        print(samples.shape)
+        for s in samples:
             samples_set.append(s)
-    
-    m = np.array([float(m) for m in json_dict.keys()])
+    samples_set = np.array(samples_set)
+    m = np.fromiter(json_dict.keys(), dtype = float)
     
     # Saves all samples in a single file
+    j_dict = {str(mi): list(draws) for mi, draws in zip(m, samples_set.T)}
     jsonfile = open(json_folder + '/all_samples.json', 'w')
-    json.dump(samples_set, jsonfile)
+    json.dump(j_dict, jsonfile)
     jsonfile.close()
 
     # Builds interpolants
