@@ -145,6 +145,12 @@ def main():
     else:
         assign = None
     
+    # Create a RandomState
+    if options.seed:
+        rdstate = np.random.RandomState(seed = 1)
+    else:
+        rdstate = np.random.RandomState()
+    
     save_options(options)
     
     ray.init(num_cpus = 1)
@@ -161,10 +167,10 @@ def main():
                                 diagnostic = bool(options.diagnostic),
                                 initial_cluster_number = int(options.initial_cluster_number),
                                 transformed = False,
-                                seed = bool(options.seed),
                                 var_symbol = options.symbol,
                                 unit = options.unit,
                                 sigma_max = options.sigma_max,
+                                rdstate = rdstate
                                 )
     pool = ActorPool([sampler])
     bin = []
