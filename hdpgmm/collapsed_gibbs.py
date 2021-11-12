@@ -248,7 +248,7 @@ class CGSampler:
         new_samples = np.sqrt(2)*erfinv(2*cdf-1)
         return new_samples
     
-    def initialise_samplers(self, marker):
+    def initialise_samplers(self):
         '''
         Initialises n_parallel_threads instances of SE_Sampler class
         
@@ -259,21 +259,14 @@ class CGSampler:
             :list: list of SE_samplers ready to run
         '''
         event_samplers = []
-        for i, (ev, t_ev) in enumerate(zip(self.events[marker:marker+self.n_parallel_threads], self.transformed_events[marker:marker+self.n_parallel_threads])):
+        for i in range(self.n_parallel_threads):
             event_samplers.append(SE_Sampler.remote(
-                                            mass_samples  = t_ev,
-                                            event_id      = self.names[marker+i],
                                             burnin        = self.burnin_ev,
                                             n_draws       = self.n_draws_ev,
                                             step          = self.step_ev,
-                                            real_masses   = ev,
                                             alpha0        = self.alpha0,
                                             a             = self.a_ev,
                                             V             = self.V_ev,
-                                            m_min         = np.min(ev),
-                                            m_max         = np.max(ev),
-                                            t_min         = np.min(t_ev),
-                                            t_max         = np.max(t_ev),
                                             glob_m_max    = self.m_max,
                                             glob_m_min    = self.m_min,
                                             output_folder = self.output_folder,
@@ -281,12 +274,11 @@ class CGSampler:
                                             diagnostic    = self.diagnostic,
                                             transformed   = True,
                                             seed          = self.seed,
-                                            inj_post      = self.inj_post[self.names[marker+i]],
                                             var_symbol    = self.var_symbol,
                                             unit          = self.unit,
                                             initial_cluster_number = self.icn,
                                             ))
-        return event_samplers
+        return ActorPool(event_samplers)
         
     def run_event_sampling(self):
         '''
@@ -298,13 +290,11 @@ class CGSampler:
             ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads, log_to_driver = False)
         i = 0
         self.posterior_functions_events = []
-        for n in range(int(len(self.events)/self.n_parallel_threads)+1):
-            tasks = self.initialise_samplers(n*self.n_parallel_threads)
-            pool = ActorPool(tasks)
-            for s in pool.map(lambda a, v: a.run.remote(), range(len(tasks))):
-                self.posterior_functions_events.append(s)
-                i += 1
-                print('\rProcessed {0}/{1} events\r'.format(i, len(self.events)), end = '')
+        pool = self.initialise_samplers()
+        for s in pool.map(lambda a, v: a.run.remote(v), [[t_ev, id, None, ev, None, None] for ev, id, t_ev in zip(self.events, self.names, self.transformed_events)]):
+            self.posterior_functions_events.append(s)
+            i += 1
+            print('\rProcessed {0}/{1} events\r'.format(i, len(self.events)), end = '')
         ray.shutdown()
         return
     
@@ -418,19 +408,12 @@ class SE_Sampler:
         sampler = SE_Sampler(*args)
         sampler.run()
     '''
-    def __init__(self, mass_samples,
-                       event_id,
-                       burnin,
+    def __init__(self, burnin,
                        n_draws,
                        step,
-                       real_masses = None,
                        alpha0 = 1,
                        a = 3,
                        V = 1/4.,
-                       m_min = 5,
-                       m_max = 50,
-                       t_min = -4,
-                       t_max = 4,
                        glob_m_max = None,
                        glob_m_min = None,
                        output_folder = './',
@@ -438,7 +421,6 @@ class SE_Sampler:
                        diagnostic = False,
                        initial_cluster_number = 5.,
                        transformed = False,
-                       inj_post = None,
                        seed = False,
                        var_symbol = 'M',
                        unit       = 'M_{\\odot}',
@@ -449,48 +431,23 @@ class SE_Sampler:
             self.rdstate = np.random.RandomState(seed = 1)
         else:
             self.rdstate = np.random.RandomState()
-        if real_masses is None:
-            self.initial_samples = mass_samples
-        else:
-            self.initial_samples = real_masses
         
-        self.initial_assign = initial_assign
-        self.e_ID    = event_id
         self.burnin  = burnin
         self.n_draws = n_draws
         self.step    = step
-        self.m_min   = np.min([m_min, np.min(real_masses)])
-        self.m_max   = np.max([m_max, np.max(real_masses)])
-        self.m_min_plot = m_min
-        self.m_max_plot = m_max
-        if glob_m_min is None:
-            self.glob_m_min = self.m_min
-        else:
-            self.glob_m_min = glob_m_min
-            
-        if glob_m_max is None:
-            self.glob_m_max = self.m_max
-        else:
-            self.glob_m_max = glob_m_max
         
-        if transformed:
-            self.mass_samples = mass_samples
-            self.t_max   = t_max
-            self.t_min   = t_min
-        else:
-            self.mass_samples = self.transform(mass_samples)
-            self.t_max        = self.transform(self.m_max)
-            self.t_min        = self.transform(self.m_min)
-            
+        self.glob_m_min = glob_m_min
+        self.glob_m_max = glob_m_max
+        
         if sigma_max is None:
-            self.sigma_max = np.std(self.mass_samples)/2.
+            self.sigma_max_from_data = True
         else:
+            self.sigma_max_from_data = False
             self.sigma_max = sigma_max
+        
         # DP parameters
         self.alpha0 = alpha0
         # NIG prior parameters
-        self.b  = a*(self.sigma_max/2.)**2
-        self.mu = np.mean(self.mass_samples)
         self.a  = a
         self.V  = V
         # Miscellanea
@@ -499,12 +456,9 @@ class SE_Sampler:
         self.SuffStat = namedtuple('SuffStat', 'mean var N')
         # Output
         self.output_folder = output_folder
-        self.mixture_samples = []
-        self.n_clusters = [self.icn]
         self.verbose = verbose
         self.diagnostic = diagnostic
-        self.alpha_samples = []
-        self.inj_post = inj_post
+        self.transformed = transformed
         self.var_symbol = var_symbol
         self.unit = unit
         
@@ -1069,10 +1023,78 @@ class SE_Sampler:
         fig_conv.savefig(self.convergence_folder + '/convergence_true_{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
         return
         
-    def run(self):
+    def run(self, args):
         """
         Runs the sampler, saves samples and produces output plots.
+        
+        Arguments:
+            :iterable args: Iterable with arguments. These are (in order):
+                                - mass samples: the samples to analyse
+                                - event id: name to be given to the data set
+                                - (m_min, m_max): lower and upper bound for mass (optional - if not provided, uses min(mass_samples) and max(mass_samples))
+                                - real masses: samples in natural space, if mass samples are already transformed (optional - if it does not apply, use None)
+                                - injected posterior: if the dataset is simulated, the posterior used to generate the data (optional - if it does not apply, use None)
+                                - inital assignment: initial guess for cluster assignments (optional - if it does not apply, use None)
         """
+        
+        # Unpack arguments
+        mass_samples = args[0]
+        event_id = args[1]
+        real_masses = args[3]
+        
+        if args[2] is not None:
+            m_min, m_max = args[2]
+        else:
+            if real_masses is not None:
+                m_min = np.min(real_masses)
+                m_max = np.max(real_masses)
+            else:
+                m_min = np.min(mass_samples)
+                m_max = np.max(mass_samples)
+        inj_post = args[4]
+        initial_assign = args[5]
+        
+        # Store arguments
+        if real_masses is None:
+            self.initial_samples = mass_samples
+        else:
+            self.initial_samples = real_masses
+            
+        self.initial_assign = initial_assign
+        self.e_ID           = event_id
+        
+        self.m_min      = np.min([m_min, np.min(real_masses)])
+        self.m_max      = np.max([m_max, np.max(real_masses)])
+        self.m_min_plot = m_min
+        self.m_max_plot = m_max
+
+        if self.glob_m_min is None:
+            self.glob_m_min = self.m_min
+        if self.glob_m_max is None:
+            self.glob_m_max = self.m_max
+
+        if self.transformed:
+            self.mass_samples = mass_samples
+            self.t_max        = np.max(mass_samples)
+            self.t_min        = np.min(mass_samples)
+        else:
+            self.mass_samples = self.transform(mass_samples)
+            self.t_max        = self.transform(self.m_max)
+            self.t_min        = self.transform(self.m_min)
+        
+        if self.sigma_max_from_data:
+            self.sigma_max = np.std(self.mass_samples)/2.
+        
+        self.b  = self.a*(self.sigma_max/2.)**2
+        self.mu = np.mean(self.mass_samples)
+        
+        self.inj_post = inj_post
+        
+        self.alpha_samples = []
+        self.mixture_samples = []
+        self.n_clusters = [self.icn]
+        
+        # Run the analysis
         self.make_folders()
         self.run_sampling()
         self.postprocess()
