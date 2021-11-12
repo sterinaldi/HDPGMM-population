@@ -12,10 +12,10 @@ import json
 from scipy.special import logsumexp
 from scipy.spatial.distance import jensenshannon as js
 from hdpgmm.preprocessing import load_data
+from distutils.spawn import find_executable
 
-rcParams["text.usetex"] = True
-rcParams["font.serif"] = "Computer Modern"
-rcParams["font.family"] = "Serif"
+if find_executable('latex'):
+    rcParams["text.usetex"] = True
 rcParams["xtick.labelsize"]=14
 rcParams["ytick.labelsize"]=14
 rcParams["xtick.direction"]="in"

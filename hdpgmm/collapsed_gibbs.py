@@ -28,6 +28,8 @@ from numba import jit, njit
 from numba.extending import get_cython_function_address
 import ctypes
 
+from distutils.spawn import find_executable
+
 _PTR = ctypes.POINTER
 _dble = ctypes.c_double
 _ptr_dble = _PTR(_dble)
@@ -40,9 +42,8 @@ gammaln_float64 = functype(addr)
 def numba_gammaln(x):
   return gammaln_float64(x)
 
-rcParams["text.usetex"] = True
-rcParams["font.serif"] = "Computer Modern"
-rcParams["font.family"] = "Serif"
+if find_executable('latex'):
+    rcParams["text.usetex"] = True
 rcParams["xtick.labelsize"]=14
 rcParams["ytick.labelsize"]=14
 rcParams["xtick.direction"]="in"
