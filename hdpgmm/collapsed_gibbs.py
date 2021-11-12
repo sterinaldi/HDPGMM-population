@@ -995,8 +995,9 @@ class SE_Sampler:
             Scipy's implementation of JS distance requires scipy.special.rel_entr, which returns inf if one of the entries of qnp1 is 0.
             This is to cure this issue.
             '''
-            qn   = self.prob_draws[i][np.where([pi > 0 for pi in self.prob_draws[i+1]])]
-            qnp1 = self.prob_draws[i+1][np.where([pi > 0 for pi in self.prob_draws[i+1]])]
+            both_non_zero = np.where([pi > 0 and qi > 0 for pi, qi in zip(self.prob_draws[i], self.prob_draws[i+1])])
+            qn   = self.prob_draws[i][both_non_zero]
+            qnp1 = self.prob_draws[i+1][both_non_zero]
             dist[i] = js(qn, qnp1)
         avg = np.mean(dist[len(dist)//2:])
         dev = np.std(dist[len(dist)//2:])
@@ -1305,15 +1306,11 @@ class MF_Sampler():
             :dict: p_i for each cluster
         """
         cluster_ids = list(state['ev_in_cl'].keys()) + ['new']
-        # can't pickle injected density
-        saved_injected_density = self.injected_density
-        self.injected_density  = None
         output = self.p.map(lambda a, v: a.compute_score.remote(v), [[data_id, cid, state, self.posterior_draws] for cid in cluster_ids])
         scores = {}
         for out in output:
             scores[out[0]] = out[1]
             self.numerators[out[0]] = out[2]
-        self.injected_density = saved_injected_density
         normalization = 1/sum(scores.values())
         scores = {cid: score*normalization for cid, score in scores.items()}
         return scores
@@ -1697,8 +1694,9 @@ class MF_Sampler():
             Scipy's implementation of JS distance requires scipy.special.rel_entr, which returns inf if one of the entries of qnp1 is 0.
             This is to cure this issue.
             '''
-            qn   = self.prob_draws[i][np.where([pi > 0 for pi in self.prob_draws[i+1]])]
-            qnp1 = self.prob_draws[i+1][np.where([pi > 0 for pi in self.prob_draws[i+1]])]
+            both_non_zero = np.where([pi > 0 and qi > 0 for pi, qi in zip(self.prob_draws[i], self.prob_draws[i+1])])
+            qn   = self.prob_draws[i][both_non_zero]
+            qnp1 = self.prob_draws[i+1][both_non_zero]
             dist[i] = js(qn, qnp1)
         avg = np.mean(dist[len(dist)//2:])
         dev = np.std(dist[len(dist)//2:])
