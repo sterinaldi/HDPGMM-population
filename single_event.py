@@ -117,7 +117,7 @@ def main():
         options.assign_file = None
     if options.sigma_max == 'None':
         options.sigma_max = None
-    else:
+    elif not options.sigma_max == None:
         options.sigma_max = float(options.sigma_max)
     
     # Reads hyperpriors and sampling settings
