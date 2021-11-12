@@ -168,7 +168,7 @@ def main():
                                 )
     pool = ActorPool([sampler])
     bin = []
-    for s in pool.map(lambda a, v: a.run.remote(v), [[event, name, None, (float(options.mmin), float(options.mmax)), inj_post, assign]]):
+    for s in pool.map(lambda a, v: a.run.remote(v), [[event, name, (float(options.mmin), float(options.mmax)), None, inj_post, assign]]):
         bin.append(s)
 
 if __name__=='__main__':
