@@ -1063,8 +1063,8 @@ class SE_Sampler:
         self.initial_assign = initial_assign
         self.e_ID           = event_id
         
-        self.m_min      = np.min([m_min, np.min(real_masses)])
-        self.m_max      = np.max([m_max, np.max(real_masses)])
+        self.m_min      = np.min([m_min, np.min(self.initial_samples)])
+        self.m_max      = np.max([m_max, np.max(self.initial_samples)])
         self.m_min_plot = m_min
         self.m_max_plot = m_max
 
@@ -1596,7 +1596,7 @@ class MF_Sampler():
             JSD = {}
             for perc in percentiles:
                 JSD[perc] = np.percentile(ent, perc, axis = 0)
-            print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]))
+            print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(*np.round((JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]), decimals = 3)))
             np.savetxt(self.output_events + '/JSD.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
         
     
