@@ -260,6 +260,10 @@ class CGSampler:
         '''
         event_samplers = []
         for i in range(self.n_parallel_threads):
+            if self.seed:
+                rdstate = np.random.RandomState(seed = 1)
+            else:
+                rdstate = np.random.RandomState()
             event_samplers.append(SE_Sampler.remote(
                                             burnin        = self.burnin_ev,
                                             n_draws       = self.n_draws_ev,
@@ -273,9 +277,9 @@ class CGSampler:
                                             verbose       = self.verbose,
                                             diagnostic    = self.diagnostic,
                                             transformed   = True,
-                                            seed          = self.seed,
                                             var_symbol    = self.var_symbol,
                                             unit          = self.unit,
+                                            rdstate       = rdstate,
                                             initial_cluster_number = self.icn,
                                             ))
         return ActorPool(event_samplers)
@@ -348,11 +352,11 @@ class CGSampler:
                        m_max_plot                 = self.m_max_plot,
                        n_parallel_threads         = self.n_parallel_threads,
                        transformed                = True,
-                       seed                       = self.seed,
                        initial_cluster_number     = min([self.icn, len(self.posterior_functions_events)]),
                        var_symbol                 = self.var_symbol,
                        unit                       = self.unit,
                        diagnostic                 = self.diagnostic,
+                       rdstate                    = self.rdstate,
                        )
         sampler.run()
     
@@ -400,6 +404,7 @@ class SE_Sampler:
         :double transformed:            mass samples are already in probit space
         :bool diagnostic:               run diagnostic routines
         :dict inj_post:                 injected posterior (interpolant)
+        :class np.random.RandomState:   RandomState (reproducibility)
         
     Returns:
         :SE_Sampler: instance of SE_Sampler class
@@ -421,16 +426,17 @@ class SE_Sampler:
                        diagnostic = False,
                        initial_cluster_number = 5.,
                        transformed = False,
-                       seed = False,
                        var_symbol = 'M',
                        unit       = 'M_{\\odot}',
                        sigma_max  = None,
                        initial_assign = None,
+                       rdstate = None
                        ):
-        if seed:
-            self.rdstate = np.random.RandomState(seed = 1)
-        else:
+                       
+        if rdstate == None:
             self.rdstate = np.random.RandomState()
+        else:
+            self.rdstate = rdstate
         
         self.burnin  = burnin
         self.n_draws = n_draws
@@ -576,8 +582,6 @@ class SE_Sampler:
         t_x     = (x - mu_n)/t_sigma
         # Compute logLikelihood
         logL = my_student_t(df = 2*a_n, t = t_x)
-        if not np.isfinite(logL):
-            print(self.e_ID, logL, mean, sigma, x)
         return logL
 
     def add_datapoint_to_suffstats(self, x, ss):
@@ -734,7 +738,7 @@ class SE_Sampler:
             if a_new > 0:
                 logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
                 logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
-                if logP_new - logP_old > np.log(random.uniform()):
+                if logP_new - logP_old > np.log(self.rdstate.uniform()):
                     a_old = a_new
         return a_old
 
@@ -1156,18 +1160,16 @@ class MF_Sampler():
                        ncheck = 5,
                        transformed = False,
                        diagnostic = False,
-                       seed = False,
                        var_symbol = 'M',
-                       unit = 'M_{\\odot}'
+                       unit = 'M_{\\odot}',
+                       rdstate = None
                        ):
         
-        if seed:
-            self.rdstate = np.random.RandomState(seed = 1)
-        else:
+        if rdstate == None:
             self.rdstate = np.random.RandomState()
+        else:
+            self.rdstate = rdstate
         
-        self.seed = seed
-            
         self.burnin  = burnin
         self.n_draws = n_draws
         self.step    = step
@@ -1369,7 +1371,7 @@ class MF_Sampler():
         self.numerators = {}
         scores = self.cluster_assignment_distribution(data_id, state).items()
         labels, scores = zip(*scores)
-        cid = random.choice(labels, p=scores)
+        cid = self.rdstate.choice(labels, p=scores)
         if cid == "new":
             new_cid = self.create_cluster(state)
             state['logL_D'][int(new_cid)] = self.numerators[cid]
@@ -1432,7 +1434,7 @@ class MF_Sampler():
             if a_new > 0:
                 logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
                 logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
-                if logP_new - logP_old > np.log(random.uniform()):
+                if logP_new - logP_old > np.log(self.rdstate.uniform()):
                     a_old = a_new
         return a_old
     
@@ -1467,7 +1469,7 @@ class MF_Sampler():
         components = {}
         for i, cid in enumerate(state['cluster_ids_']):
             events = [self.posterior_draws[j] for j in state['ev_in_cl'][cid]]
-            m, s = sample_point(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max, burnin = 1000, seed = self.seed)
+            m, s = sample_point(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max, burnin = 1000, rdstate = self.rdstate)
             components[i] = {'mean': m, 'sigma': s, 'weight': weights[i]}
         self.mixture_samples.append(components)
     

@@ -51,7 +51,7 @@ def propose_point(old_point, dm, ds, rdstate):
     s = old_point[1] + rdstate.uniform(-1,1)*ds
     return [m,s]
 
-def sample_point(events, m_min, m_max, s_min, s_max, burnin = 1000, dm = 3, ds = 1, seed = False):
+def sample_point(events, m_min, m_max, s_min, s_max, rdstate, burnin = 1000, dm = 3, ds = 1):
     """
     Draws mean and standard deviation for a mixture component using a Metropolis-Hastings sampling scheme.
     
@@ -68,10 +68,7 @@ def sample_point(events, m_min, m_max, s_min, s_max, burnin = 1000, dm = 3, ds =
         :double: mean
         :double: standard deviation
     """
-    if seed:
-        rdstate = np.random.RandomState(seed = 1)
-    else:
-        rdstate = np.random.RandomState()
+    rdstate = rdstate
     old_point = [uniform(m_min, m_max), uniform(s_min, s_max)]
     for _ in range(burnin):
         new_point = propose_point(old_point, dm, ds, rdstate)

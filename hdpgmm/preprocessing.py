@@ -71,7 +71,7 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.
                 events.append(np.sort(np.genfromtxt(event)))
         else:
             events.append(np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol))))
-    return (np.array(events), np.array(names))
+    return (events, np.array(names))
 
 def unpack_gw_posterior(event, par, cosmology, n_samples = -1,):
     '''
