@@ -150,31 +150,25 @@ def main():
     ray.init(num_cpus = 1)
     
     sampler = HDPGMM.SE_Sampler.remote(
-                                mass_samples = event,
-                                event_id     = name,
                                 burnin = int(options.burnin),
                                 n_draws = int(options.n_draws),
                                 step = int(options.step),
                                 alpha0 = float(options.alpha0),
                                 a = float(options.a),
                                 V = float(options.V),
-                                m_min = float(options.mmin),
-                                m_max = float(options.mmax),
                                 output_folder = options.output,
                                 verbose = True,
                                 diagnostic = bool(options.diagnostic),
                                 initial_cluster_number = int(options.initial_cluster_number),
                                 transformed = False,
-                                inj_post = inj_post,
                                 seed = bool(options.seed),
                                 var_symbol = options.symbol,
                                 unit = options.unit,
                                 sigma_max = options.sigma_max,
-                                initial_assign = assign,
                                 )
     pool = ActorPool([sampler])
     bin = []
-    for s in pool.map(lambda a, v: a.run.remote(), range(1)):
+    for s in pool.map(lambda a, v: a.run.remote(v), [[event, name, None, (float(options.mmin), float(options.mmax)), inj_post, assign]]):
         bin.append(s)
 
 if __name__=='__main__':
