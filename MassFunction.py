@@ -373,7 +373,7 @@ def main():
     # Joins samples from different runs
     samples = []
     json_folder = options.output + '/mass_function/'
-    json_files  = [json_folder + f for f in os.listdir(json_folder) if (f.startswith('posterior_functions_') or f.startswith('checkpoint'))]
+    json_files  = [json_folder + f for f in os.listdir(json_folder) if (f.startswith('posterior_functions_'))]
     
     samples_set = []
     for file in json_files:
