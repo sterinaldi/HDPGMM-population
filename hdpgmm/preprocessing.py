@@ -79,9 +79,10 @@ def unpack_gw_posterior(event, par, cosmology, n_samples = -1,):
     Implemented 'm1', 'm2', 'mc', 'z', 'chi_eff'.
     
     Arguments:
-        :str event:     file to read
-        :str par:       parameter to extract
-        :int n_samples: number of samples for (random) downsampling. Default -1: all samples
+        :str event:       file to read
+        :str par:         parameter to extract
+        :tuple cosmology: cosmological parameters (h, om, ol)
+        :int n_samples:   number of samples for (random) downsampling. Default -1: all samples
     
     Returns:
         :np.ndarray:    samples
