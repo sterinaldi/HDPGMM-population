@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for N in 100 177 316 562 1000 1778 3162 5623 10000
+for N in 100 177 316 500 562 1000 1778 3162 5000 5623 10000
 do
     echo $N
     python single_event.py --optfile notebooks/convergence_test/options_shrinkage.ini --n_samps_dsp $N
