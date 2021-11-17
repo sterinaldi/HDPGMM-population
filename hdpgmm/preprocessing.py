@@ -4,7 +4,7 @@ import h5py
 from astropy.cosmology import LambdaCDM, z_at_value
 import astropy.units as u
 
-def load_single_event(event, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.315, ol = 0.685):
+def load_single_event(event, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315, ol = 0.685):
     '''
     Loads the data from .txt files (for simulations) or .h5/.hdf5 files (posteriors from GWTC) for a single event.
     Default cosmological parameters from Planck Collaboration (2021) in a flat Universe (https://www.aanda.org/articles/aa/pdf/2020/09/aa33910-18.pdf)
@@ -22,21 +22,23 @@ def load_single_event(event, seed = False, par = 'm1', n_samples = -1, h = 0.674
         :np.ndarray:    samples
         :np.ndarray:    name
     '''
-    if seed:
-        np.random.seed(seed = 1)
+    if not seed == 0:
+        rdstate = np.random.RandomState(seed = 1)
+    else:
+        rdstate = np.random.RandomState()
     name, ext = event.split('/')[-1].split('.')
     if ext == 'txt':
         if n_samples > -1:
             samples = np.genfromtxt(event)
             s = int(min([n_samples, len(samples)]))
-            out = np.sort(np.random.choice(samples, size = s, replace = False))
+            out = np.sort(rdstate.choice(samples, size = s, replace = False))
         else:
             out = np.sort(np.genfromtxt(event))
     else:
-        out = np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol)))
+        out = np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol), rdstate = rdstate))
     return out, name
 
-def load_data(path, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.315, ol = 0.685):
+def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315, ol = 0.685):
     '''
     Loads the data from .txt files (for simulations) or .h5/.hdf5 files (posteriors from GWTC).
     Default cosmological parameters from Planck Collaboration (2021) in a flat Universe (https://www.aanda.org/articles/aa/pdf/2020/09/aa33910-18.pdf)
@@ -54,8 +56,11 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.
         :np.ndarray:    samples
         :np.ndarray:    names
     '''
-    if seed:
-        np.random.RandomState(seed = 1)
+    if not seed == 0:
+        rdstate = np.random.RandomState(seed = 1)
+    else:
+        rdstate = np.random.RandomState()
+        
     event_files = [path+'/'+f for f in os.listdir(path) if not f.startswith('.')]
     events = []
     names  = []
@@ -66,14 +71,14 @@ def load_data(path, seed = False, par = 'm1', n_samples = -1, h = 0.674, om = 0.
             if n_samples > -1:
                 samples = np.genfromtxt(event)
                 s = int(min([n_samples, len(samples)]))
-                events.append(np.sort(np.random.choice(samples, size = s, replace = False)))
+                events.append(np.sort(rdstate.choice(samples, size = s, replace = False)))
             else:
                 events.append(np.sort(np.genfromtxt(event)))
         else:
-            events.append(np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol))))
+            events.append(np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol), rdstate = rdstate)))
     return (events, np.array(names))
 
-def unpack_gw_posterior(event, par, cosmology, n_samples = -1,):
+def unpack_gw_posterior(event, par, cosmology, rdstate, n_samples = -1):
     '''
     Reads data from .h5/.hdf5 GW posterior files.
     Implemented 'm1', 'm2', 'mc', 'z', 'chi_eff'.
@@ -106,7 +111,7 @@ def unpack_gw_posterior(event, par, cosmology, n_samples = -1,):
                 samples = data['chi_eff']
             if n_samples > -1:
                 s = int(min([n_samples, len(samples)]))
-                return np.random.choice(samples, size = s, replace = False)
+                return rdstate.choice(samples, size = s, replace = False)
             else:
                 return samples
         except:
@@ -137,6 +142,6 @@ def unpack_gw_posterior(event, par, cosmology, n_samples = -1,):
             
             if n_samples > -1:
                 s = int(min([n_samples, len(samples)]))
-                return np.random.choice(samples, size = s, replace = False)
+                return rdstate.choice(samples, size = s, replace = False)
             else:
                 return samples

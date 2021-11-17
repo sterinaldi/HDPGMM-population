@@ -55,7 +55,7 @@ rcParams["grid.alpha"] = 0.6
 
 """
 Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
-Paper: https://arxiv.org/pdf/xxxx.xxxxx.pdf
+Paper: https://arxiv.org/pdf/2109.05960.pdf
 An excellent handbook on conjugate priors: https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf
 """
 
@@ -163,7 +163,7 @@ class CGSampler:
                        injected_density = None,
                        true_masses = None,
                        names = None,
-                       seed = False,
+                       seed = 0,
                        inj_post = None,
                        var_symbol = 'M',
                        unit = 'M_{\\odot}'
@@ -185,7 +185,7 @@ class CGSampler:
         self.m_max_plot         = m_max
         self.event_samplers     = []
         
-        if seed:
+        if not seed == 0:
             self.rdstate = np.random.RandomState(seed = 1)
         else:
             self.rdstate = np.random.RandomState()
@@ -261,7 +261,7 @@ class CGSampler:
         '''
         event_samplers = []
         for i in range(self.n_parallel_threads):
-            if self.seed:
+            if not self.seed == 0:
                 rdstate = np.random.RandomState(seed = 1)
             else:
                 rdstate = np.random.RandomState()
@@ -720,7 +720,7 @@ class SE_Sampler:
         else:
             return int(cid)
 
-    def update_alpha(self, state, burnin = 100):
+    def update_alpha(self, state, burnin = 200):
         '''
         Updates concentration parameter using a Metropolis-Hastings sampling scheme.
         
@@ -734,7 +734,7 @@ class SE_Sampler:
         a_old = state['alpha_']
         n     = state['Ntot']
         K     = len(state['cluster_ids_'])
-        for _ in range(burnin):
+        for _ in range(burnin+self.rdstate.randint(100)):
             a_new = a_old + self.rdstate.uniform(-1,1)*0.5
             if a_new > 0:
                 logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
@@ -808,16 +808,6 @@ class SE_Sampler:
             self.sample_mixture_parameters(state)
         if self.verbose:
             print('\n', end = '')
-        return
-    
-    def display_config(self):
-        print('MCMC Gibbs sampler')
-        print('------------------------')
-        print('Loaded {0} events'.format(len(self.events)))
-        print('Concentration parameters:\nalpha0 = {0}\tgamma0 = {1}'.format(self.alpha0, self.gamma0))
-        print('Burn-in: {0} samples'.format(self.burnin))
-        print('Samples: {0} - 1 every {1}'.format(self.n_draws, self.step))
-        print('------------------------')
         return
 
     def postprocess(self):
@@ -1413,7 +1403,7 @@ class MF_Sampler():
         """
         state['ev_in_cl'][cid].append(data_id)
 
-    def update_alpha(self, state, burnin = 100):
+    def update_alpha(self, state, burnin = 200):
         '''
         Updates concentration parameter using a Metropolis-Hastings sampling scheme.
         
@@ -1427,7 +1417,7 @@ class MF_Sampler():
         a_old = state['alpha_']
         n     = state['Ntot']
         K     = len(state['cluster_ids_'])
-        for _ in range(burnin):
+        for _ in range(burnin+self.rdstate.randint(100)):
             a_new = a_old + self.rdstate.uniform(-1,1)*0.5
             if a_new > 0:
                 logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
@@ -1471,17 +1461,6 @@ class MF_Sampler():
             components[i] = {'mean': m, 'sigma': s, 'weight': weights[i]}
         self.mixture_samples.append(components)
     
-    
-    def display_config(self):
-        print('MCMC Gibbs sampler')
-        print('------------------------')
-        print('Loaded {0} events'.format(len(self.mass_samples)))
-        print('Concentration parameters:\ngamma0 = {0}'.format(self.alpha0))
-        print('Burn-in: {0} samples'.format(self.burnin))
-        print('Samples: {0} - 1 every {1}'.format(self.n_draws, self.step))
-        print('------------------------')
-        return
-
     def postprocess(self):
         """
         Plots the inferred distribution and saves draws.

@@ -27,7 +27,9 @@ rcParams["grid.alpha"] = 0.6
 
 def is_opt_provided (parser, dest):
     """
-    Checks if an option is provided by the user
+    Checks if an option is provided by the user.
+    From Oleg Gryb's answer in
+    https://stackoverflow.com/questions/2593257/how-to-know-if-optparse-option-was-passed-in-the-command-line-or-as-a-default
     
     Arguments:
         :obj parser: an instance of optparse.OptionParser with the user-provided options
@@ -256,7 +258,7 @@ def main():
     parser.add_option("-v", "--verbose", dest = "verbose", action = 'store_true', default = False, help = "Display output")
     parser.add_option("-p", "--postprocessing", dest = "postprocessing", action = 'store_true', default = False, help = "Postprocessing - requires log_rec_prob_mf.txt")
     parser.add_option("-d", "--diagnostic", dest = "diagnostic", action = 'store_true', default = False, help = "Run diagnostic routines (Autocorrelation, quasi-convergence)")
-    parser.add_option("-s", "--seed", dest = "seed", action = 'store_true', default = False, help = "Fix seed for reproducibility")
+    parser.add_option("-s", "--seed", dest = "seed", type = "int", default = 0, help = "Fix seed for reproducibility")
     parser.add_option("--n_samps_dsp", dest = "n_samples_dsp", default = -1, help = "Number of samples to analyse (downsampling). Default: all")
     
     # Priors
@@ -301,6 +303,9 @@ def main():
     
     # Read cosmology
     options.h, options.om, options.ol = (float(x) for x in options.cosmology.split(','))
+    
+    # Read seed
+    options.seed = int(options.seed)
     
     # Loads events
     events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)

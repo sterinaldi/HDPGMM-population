@@ -79,7 +79,7 @@ def main():
     parser.add_option("--samp_settings", type = "string", dest = "samp_settings", help = "Burnin, samples and step", default = '10,1000,1')
     parser.add_option("--icn", dest = "initial_cluster_number", type = "float", help = "Initial cluster number", default = 5.)
     parser.add_option("-d", "--diagnostic", dest = "diagnostic", action = 'store_true', default = False, help = "Run diagnostic routines (Autocorrelation, quasi-convergence)")
-    parser.add_option("-s", "--seed", dest = "seed", action = 'store_true', default = False, help = "Fix seed for reproducibility")
+    parser.add_option("-s", "--seed", dest = "seed", type = "float", default = 0, help = "Fix seed for reproducibility")
     parser.add_option("--n_samps_dsp", dest = "n_samples_dsp", default = -1, help = "Number of samples to analyse (downsampling). Default: all")
     
     # Priors
@@ -119,6 +119,8 @@ def main():
         options.sigma_max = None
     elif not options.sigma_max == None:
         options.sigma_max = float(options.sigma_max)
+        
+    options.seed = int(options.seed)
     
     # Reads hyperpriors and sampling settings
     if options.prior is not None:
@@ -129,8 +131,8 @@ def main():
     options.h, options.om, options.ol = (float(x) for x in options.cosmology.split(','))
     
     # Loads event
-    event, name = load_single_event(event = options.event_file, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
-    
+    event, name = load_single_event(event = options.event_file, seed = options.seed, par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
+
     # Loads posterior injections and saves them as interpolants
     if options.inj_file is not None:
         post = np.genfromtxt(options.inj_file, names = True)
@@ -146,7 +148,7 @@ def main():
         assign = None
     
     # Create a RandomState
-    if options.seed:
+    if options.seed == 0:
         rdstate = np.random.RandomState(seed = 1)
     else:
         rdstate = np.random.RandomState()
