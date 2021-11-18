@@ -282,6 +282,7 @@ class CGSampler:
                                             unit          = self.unit,
                                             rdstate       = rdstate,
                                             initial_cluster_number = self.icn,
+                                            hierarchical_flag = True,
                                             ))
         return ActorPool(event_samplers)
         
@@ -434,7 +435,8 @@ class SE_Sampler:
                        unit       = 'M_{\\odot}',
                        sigma_max  = None,
                        initial_assign = None,
-                       rdstate = None
+                       rdstate = None,
+                       hierarchical_flag = False
                        ):
                        
         if rdstate == None:
@@ -445,6 +447,9 @@ class SE_Sampler:
         self.burnin  = burnin
         self.n_draws = n_draws
         self.n_steps = n_steps
+        
+        if hierarchical_flag and (glob_m_min is None or glob_m_max is None):
+            raise Warning('Running a hierarchical inference with no global min/max specified.')
         
         self.glob_m_min = glob_m_min
         self.glob_m_max = glob_m_max
@@ -464,6 +469,7 @@ class SE_Sampler:
         self.icn    = initial_cluster_number
         self.states = []
         self.SuffStat = namedtuple('SuffStat', 'mean var N')
+        self.hierarchical_flag = hierarchical_flag
         # Output
         self.output_folder = output_folder
         self.verbose = verbose
