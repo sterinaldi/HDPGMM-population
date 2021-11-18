@@ -261,6 +261,7 @@ def main():
     parser.add_option("-d", "--diagnostic", dest = "diagnostic", action = 'store_true', default = False, help = "Run diagnostic routines (Autocorrelation, quasi-convergence)")
     parser.add_option("-s", "--seed", dest = "seed", type = "int", default = 0, help = "Fix seed for reproducibility")
     parser.add_option("--n_samps_dsp", dest = "n_samples_dsp", default = -1, help = "Number of samples to analyse (downsampling). Default: all")
+    parser.add_option("-r", "--restart", dest = "restart", default = 0, help = "Restart from checkpoint or last state. Requires the analysis to be run at least once before, otherwise the inital assignment will fall back to the default assignment")
     
     # Priors
     parser.add_option("--prior_ev", type = "string", dest = "prior_ev", help = "Parameters for NIG prior (a0, V0). See https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf sec. 6 for reference", default = '1,1')
@@ -307,6 +308,9 @@ def main():
     
     # Read seed
     options.seed = int(options.seed)
+    
+    # Read restart option
+    options.restart = int(options.restart)
     
     # Loads events
     events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
@@ -373,6 +377,7 @@ def main():
                               seed = bool(options.seed),
                               var_symbol = options.symbol,
                               unit = options.unit,
+                              restart = options.restart,
                               )
         sampler.run()
     

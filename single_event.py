@@ -82,6 +82,7 @@ def main():
     parser.add_option("-d", "--diagnostic", dest = "diagnostic", action = 'store_true', default = False, help = "Run diagnostic routines (Autocorrelation, quasi-convergence)")
     parser.add_option("-s", "--seed", dest = "seed", type = "float", default = 0, help = "Fix seed for reproducibility")
     parser.add_option("--n_samps_dsp", dest = "n_samples_dsp", default = -1, help = "Number of samples to analyse (downsampling). Default: all")
+    parser.add_option("-r", "--restart", dest = "restart", default = 0, help = "Restart from checkpoint or last state. Requires the analysis to be run at least once before, otherwise the inital assignment will fall back to the default assignment")
     
     # Priors
     parser.add_option("--prior", type = "string", dest = "prior", help = "Parameters for NIG prior (a0, V0). See https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf sec. 6 for reference", default = '1,1')
@@ -121,7 +122,8 @@ def main():
     elif not options.sigma_max == None:
         options.sigma_max = float(options.sigma_max)
         
-    options.seed = int(options.seed)
+    options.seed    = int(options.seed)
+    options.restart = int(options.restart)
     
     # Reads hyperpriors and sampling settings
     if options.prior is not None:
@@ -173,7 +175,8 @@ def main():
                                 var_symbol = options.symbol,
                                 unit = options.unit,
                                 sigma_max = options.sigma_max,
-                                rdstate = rdstate
+                                rdstate = rdstate,
+                                restart = options.restart,
                                 )
     pool = ActorPool([sampler])
     bin = []

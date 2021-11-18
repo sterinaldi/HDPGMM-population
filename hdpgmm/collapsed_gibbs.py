@@ -57,7 +57,7 @@ rcParams["grid.alpha"] = 0.6
 
 """
 Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
-Paper: https://arxiv.org/pdf/2109.05960.pdf
+All the equations and listings cited in the documentation are in https://arxiv.org/pdf/2109.05960.pdf
 An excellent handbook on conjugate priors: https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf
 """
 
@@ -140,7 +140,11 @@ class CGSampler:
         :iterable true_masses:          draws from injected_density around which are drawn simulated samples
         :iterable names:                str containing names to be given to single-event output files (e.g. ['GW150814', 'GW170817'])
         :bool seed:                     fixes seed to a default value (1) for reproducibility
-    
+        :iterable inj_post:             list of simulated posterior distributions (callables), one for each event
+        :str var_symbol:                LaTeX-style quantity symbol, for plotting purposes
+        :str unit:                      LaTeX-style quantity unit, for plotting purposes. Use '' for dimensionless quantities
+        :bool restart:                  restarts from last assignment checkpoint.
+        
     Returns:
         :CGSampler: instance of CGSampler class
     
@@ -168,7 +172,8 @@ class CGSampler:
                        seed = 0,
                        inj_post = None,
                        var_symbol = 'M',
-                       unit = 'M_{\\odot}'
+                       unit = 'M_{\\odot}',
+                       restart = False
                        ):
         
         # Settings
@@ -178,7 +183,8 @@ class CGSampler:
             self.burnin_ev, self.n_draws_ev, self.n_steps_ev = samp_settings_ev
         else:
             self.burnin_ev, self.n_draws_ev, self.n_steps_ev = samp_settings
-            
+        
+        self.restart            = restart
         self.verbose            = verbose
         self.diagnostic         = diagnostic
         self.process_events     = process_events
@@ -283,6 +289,7 @@ class CGSampler:
                                             var_symbol    = self.var_symbol,
                                             unit          = self.unit,
                                             rdstate       = rdstate,
+                                            restart       = self.restart,
                                             initial_cluster_number = self.icn,
                                             hierarchical_flag = True,
                                             ))
@@ -364,6 +371,7 @@ class CGSampler:
                        unit                       = self.unit,
                        diagnostic                 = self.diagnostic,
                        rdstate                    = self.rdstate,
+                       restart                    = self.restart,
                        )
         sampler.run()
     
@@ -407,8 +415,9 @@ class SE_Sampler:
         :str unit:                      LaTeX-style quantity unit, for plotting purposes. Use '' for dimensionless quantities
         :float sigma_max:               maximum value for cluster standard deviation. If None, this quantity is inferred from the data
         :iterable initial_assign:       initial guess for assignment. If None, samples are divided into N different adjacent chunks, where N is initial_cluster_number
-        :class np.random.RandomState:   RandomState (for reproducibility)
+        :np.random.RandomState rdstate: RandomState (for reproducibility)
         :bool hierarchical_flag:        marks if the class has been instantiated for a hierarchical inference
+        :bool restart:                  restarts from last assignment checkpoint. Requires the analysis to run at least once, otherwise the initial assignment will fall back to the default assignment. If both restart and initial_assign are provided, checkpoint is used.
         
     Returns:
         :SE_Sampler: instance of SE_Sampler class
@@ -440,7 +449,8 @@ class SE_Sampler:
                        sigma_max  = None,
                        initial_assign = None,
                        rdstate = None,
-                       hierarchical_flag = False
+                       hierarchical_flag = False,
+                       restart = False,
                        ):
                        
         if rdstate == None:
@@ -473,6 +483,7 @@ class SE_Sampler:
         self.icn    = initial_cluster_number
         self.SuffStat = namedtuple('SuffStat', 'mean var N')
         self.hierarchical_flag = hierarchical_flag
+        self.restart = restart
         # Output
         self.output_folder = output_folder
         self.verbose = verbose
@@ -521,10 +532,15 @@ class SE_Sampler:
             :dict 'suffstats':       mean, variance and number of samples of each active cluster
             :list 'assignment':      list of cluster assignments (one for each sample)
         '''
-        if self.initial_assign is None:
-            assign = [int(a//(len(samples)/int(self.icn))) for a in range(len(samples))]
+        if self.restart:
+            try:
+                assign = np.genfromtxt(Path(self.output_assignment, 'assignment_{0}.txt'.format(self.e_ID)))
+            except:
+                assign = np.array([int(a//(len(samples)/int(self.icn))) for a in range(len(samples))])
+        elif self.initial_assign is not None:
+            assign = self.initial_assign
         else:
-            assign = list(self.initial_assign)
+            assign = np.array([int(a//(len(samples)/int(self.icn))) for a in range(len(samples))])
         cluster_ids = list(np.arange(int(np.max(assign)+1)))
         state = {
             'cluster_ids_': cluster_ids,
@@ -777,6 +793,11 @@ class SE_Sampler:
             components[i] = {'mean': m, 'sigma': np.sqrt(s), 'weight': weights[i]}
         self.mixture_samples.append(components)
     
+    def save_assignment_state(self)
+        z = self.state['assignment']
+        np.savetxt(Path(self.output_assignment, 'assignment_{0}.txt'.format(self.e_ID)), np.array(z).T)
+        return
+    
     def run_sampling(self):
         """
         Runs the sampling algorithm - Listing 1
@@ -796,6 +817,9 @@ class SE_Sampler:
             for _ in range(self.n_steps):
                 self.gibbs_step()
             self.sample_mixture_parameters()
+            if i%100 == 0:
+                self.save_assignment_state()
+            self.save_assignment_state()
         if self.verbose:
             print('\n', end = '')
         return
@@ -909,8 +933,8 @@ class SE_Sampler:
         To cure this, just re-run the inference with the same output path.
         """
         self.output_events = Path(self.output_folder, 'reconstructed_events')
-        dirs       = ['rec_prob', 'n_clusters', 'events', 'mixtures', 'posteriors', 'entropy', 'alpha']
-        attr_names = ['output_recprob', 'output_n_clusters', 'output_pltevents', 'output_mixtures', 'output_posteriors', 'output_entropy', 'output_alpha']
+        dirs       = ['rec_prob', 'n_clusters', 'events', 'mixtures', 'posteriors', 'entropy', 'alpha', 'assignment']
+        attr_names = ['output_recprob', 'output_n_clusters', 'output_pltevents', 'output_mixtures', 'output_posteriors', 'output_entropy', 'output_alpha', 'output_assignment']
         diagnostic_dirs = ['autocorrelation', 'convergence']
         diagnostic_attr = ['output_autocorrelation', 'output_convergence']
         
@@ -1120,6 +1144,10 @@ class MF_Sampler():
         :int ncheck:                    number of draws between checkpoints
         :double transformed:            mass samples are already in probit space
         :bool diagnostic:               run diagnostic routines
+        :str var_symbol:                LaTeX-style quantity symbol, for plotting purposes
+        :str unit:                      LaTeX-style quantity unit, for plotting purposes. Use '' for dimensionless quantities
+        :np.random.RandomState rdstate: RandomState (for reproducibility)
+        :bool restart:                  restarts from last assignment checkpoint. Requires the analysis to run at least once, otherwise the initial assignment will fall back to the default assignment.
         
     Returns:
         :MF_Sampler: instance of CGSampler class
@@ -1151,7 +1179,8 @@ class MF_Sampler():
                        diagnostic = False,
                        var_symbol = 'M',
                        unit = 'M_{\\odot}',
-                       rdstate = None
+                       rdstate = None,
+                       restart = False,
                        ):
         
         if rdstate == None:
@@ -1195,6 +1224,7 @@ class MF_Sampler():
         self.diagnostic = diagnostic
         self.var_symbol = var_symbol
         self.unit = unit
+        self.restart = restart
         
         ray.init(ignore_reinit_error=True, num_cpus = n_parallel_threads)
         self.p = ActorPool([ScoreComputer.remote(self.t_min, self.t_max, self.sigma_min, self.sigma_max) for _ in range(n_parallel_threads)])
@@ -1241,7 +1271,13 @@ class MF_Sampler():
             :dict 'logL_D':            log-Likelihood for samples in cluster
         '''
         self.update_draws()
-        assign = [int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))]
+        if self.restart:
+            try:
+                assign = np.genfromtxt(Path(self.output_folder, 'assignment_mf.txt'))
+            except:
+                assign = np.array([int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))])
+        else:
+            assign = np.array([int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))])
         cluster_ids = list(np.arange(int(np.max(assign)+1)))
         state = {
             'cluster_ids_': cluster_ids,
@@ -1438,6 +1474,11 @@ class MF_Sampler():
             components[i] = {'mean': m, 'sigma': s, 'weight': weights[i]}
         self.mixture_samples.append(components)
     
+    def save_assignment_state(self)
+        z = self.state['assignment']
+        np.savetxt(Path(self.output_folder, 'assignment_mf.txt'.format(self.e_ID)), np.array(z).T)
+        return
+    
     def postprocess(self):
         """
         Plots the inferred distribution and saves draws.
@@ -1607,6 +1648,8 @@ class MF_Sampler():
             self.sample_mixture_parameters()
             if (i+1) % self.ncheck == 0:
                 self.checkpoint()
+                self.save_assignment_state()
+        self.save_assignment_state()
         print('\n', end = '')
         return
 
