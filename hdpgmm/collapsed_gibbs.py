@@ -4,6 +4,8 @@ import os
 import re
 import json
 
+from pathlib import Path
+
 from collections import namedtuple, Counter
 from numpy import random
 
@@ -210,10 +212,10 @@ class CGSampler:
         self.icn    = initial_cluster_number
         
         # Output
-        self.output_folder      = output_folder
+        self.output_folder      = Path(output_folder)
         self.injected_density   = injected_density
         self.true_masses        = true_masses
-        self.output_recprob     = os.path.join(self.output_folder, os.path.join('reconstructed_events','mixtures'))
+        self.output_recprob     = Path(self.output_folder, 'reconstructed_events','mixtures')
         self.inj_post           = inj_post
         self.var_symbol         = var_symbol
         self.unit               = unit
@@ -310,7 +312,7 @@ class CGSampler:
         '''
         print('Loading mixtures...')
         self.posterior_functions_events = []
-        prob_files = [self.output_recprob+f for f in os.listdir(self.output_recprob) if f.startswith('posterior_functions')]
+        prob_files = [Path(self.output_recprob, f) for f in os.listdir(self.output_recprob) if f.startswith('posterior_functions')]
         prob_files.sort(key = natural_keys)
         for prob in prob_files:
             sampfile = open(prob, 'r')
@@ -335,9 +337,9 @@ class CGSampler:
         Creates an instance of MF_Sampler class.
         '''
         self.load_mixtures()
-        self.mf_folder = os.path.join(self.output_folder, 'mass_function')
-        if not os.path.exists(self.mf_folder):
-            os.mkdir(self.mf_folder)
+        self.mf_folder = Path(self.output_folder, 'mass_function')
+        if not self.mf_folder.exists():
+            self.mf_folder.mkdir()
         flattened_transf_ev = np.array([x for ev in self.transformed_events for x in ev])
         sampler = MF_Sampler(
                        posterior_functions_events = self.posterior_functions_events,
@@ -467,7 +469,6 @@ class SE_Sampler:
         self.V  = V
         # Miscellanea
         self.icn    = initial_cluster_number
-        self.states = []
         self.SuffStat = namedtuple('SuffStat', 'mean var N')
         self.hierarchical_flag = hierarchical_flag
         # Output
@@ -849,7 +850,7 @@ class SE_Sampler:
         
         # saves interpolant functions into json file
         j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
-        with open(os.path.join(self.output_posteriors, 'posterior_functions_{0}.json'.format(self.e_ID)), 'w') as jsonfile:
+        with open(Path(self.output_posteriors, 'posterior_functions_{0}.json'.format(self.e_ID)), 'w') as jsonfile:
             json.dump(j_dict, jsonfile)
         
         # computes percentiles
@@ -861,7 +862,7 @@ class SE_Sampler:
         
         # Saves median and CR
         names = ['m'] + [str(perc) for perc in percentiles]
-        np.savetxt(os.path.join(self.output_recprob, 'log_rec_prob_{0}.txt'.format(self.e_ID)), np.array([app, p[5], p[16], p[50], p[84], p[95]]).T, header = ' '.join(names))
+        np.savetxt(Path(self.output_recprob, 'log_rec_prob_{0}.txt'.format(self.e_ID)), np.array([app, p[5], p[16], p[50], p[84], p[95]]).T, header = ' '.join(names))
         
         for perc in percentiles:
             p[perc] = np.exp(np.percentile(prob, perc, axis = 1))
@@ -875,11 +876,11 @@ class SE_Sampler:
             sample = np.exp(prob[:,i])
             ent.append(js(sample,p[50]))
         mean_ent = np.mean(ent)
-        np.savetxt(os.path.join(self.output_entropy, 'KLdiv_{0}.txt'.format(self.e_ID)), np.array(ent), header = 'mean JS distance = {0}'.format(mean_ent))
+        np.savetxt(Path(self.output_entropy, 'KLdiv_{0}.txt'.format(self.e_ID)), np.array(ent), header = 'mean JS distance = {0}'.format(mean_ent))
         
         # saves mixture samples into json file
         j_dict = {str(i): sample for i, sample in enumerate(self.mixture_samples)}
-        with open(os.path.join(self.output_mixtures, 'posterior_functions_{0}.json'.format(self.e_ID)), 'w') as jsonfile:
+        with open(Path(self.output_mixtures, 'posterior_functions_{0}.json'.format(self.e_ID)), 'w') as jsonfile:
             json.dump(j_dict, jsonfile)
         
         # plots median and CR of reconstructed probability density
@@ -899,10 +900,10 @@ class SE_Sampler:
         ax.set_xlim(self.m_min_plot, self.m_max_plot)
         ax.grid(True,dashes=(1,3))
         ax.legend(loc=0,frameon=False,fontsize=10)
-        plt.savefig(os.path.join(self.output_pltevents, '{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
+        plt.savefig(Path(self.output_pltevents, '{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
         try:
             ax.set_yscale('log')
-            plt.savefig(os.path.join(self.output_pltevents, 'log_{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
+            plt.savefig(Path(self.output_pltevents, 'log_{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
         except:
             pass
         
@@ -910,13 +911,13 @@ class SE_Sampler:
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(np.arange(len(self.n_clusters)), self.n_clusters, ls = '--', marker = ',', linewidth = 0.5)
-        fig.savefig(os.path.join(self.output_n_clusters, 'n_clusters_{0}.pdf'.format(self.e_ID)), bbox_inches='tight')
+        fig.savefig(Path(self.output_n_clusters, 'n_clusters_{0}.pdf'.format(self.e_ID)), bbox_inches='tight')
         
         # plots concentration parameter
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))))
-        fig.savefig(os.path.join(self.output_alpha, 'alpha_{0}.pdf'.format(self.e_ID)), bbox_inches='tight')
+        fig.savefig(Path(self.output_alpha, 'alpha_{0}.pdf'.format(self.e_ID)), bbox_inches='tight')
     
     def make_folders(self):
         """
@@ -928,30 +929,34 @@ class SE_Sampler:
         This is due to the fact that two different samplers are trying to create one of the shared folders at the same time.
         To cure this, just re-run the inference with the same output path.
         """
-        self.output_events = os.path.join(self.output_folder, 'reconstructed_events')
+        self.output_events = Path(self.output_folder, 'reconstructed_events')
         dirs       = ['rec_prob', 'n_clusters', 'events', 'mixtures', 'posteriors', 'entropy', 'alpha']
         attr_names = ['output_recprob', 'output_n_clusters', 'output_pltevents', 'output_mixtures', 'output_posteriors', 'output_entropy', 'output_alpha']
         diagnostic_dirs = ['autocorrelation', 'convergence']
         diagnostic_attr = ['output_autocorrelation', 'output_convergence']
         
-        if not os.path.exists(self.output_events):
-            os.mkdir(self.output_events)
+        if not self.output_events.exists():
+            self.output_events.mkdir()
         
         for d, attr in zip(dirs, attr_names):
-            newfolder = os.path.join(self.output_events, d)
-            if not os.path.exists(newfolder):
+            newfolder = Path(self.output_events, d)
+            if not newfolder.exists():
                 try:
-                    os.mkdir(newfolder)
+                    newfolder.mkdir()
                 except:
+                    # This is to avoid that, while running several parallel single-event analysis,
+                    # more than one instance of SE_Sampler attempts to create the folder.
+                    # In that case, a (FileExistsError: [Errno 17] File exists: 'filename') is raised.
+                    # This simply ignores the error and moves on with the inference.
                     pass
             setattr(self, attr, d)
         
         if self.diagnostic:
             for d, attr in zip(diagnostic_dirs, diagnostic_attr):
-                newfolder = os.path.join(self.output_events, d)
-                if not os.path.exists(newfolder):
+                newfolder = Path(self.output_events, d)
+                if not newfolder.exists()
                     try:
-                        os.mkdir(newfolder)
+                        newfolder.mkdir()
                     except:
                         pass
                 setattr(self, attr, d)
@@ -973,7 +978,6 @@ class SE_Sampler:
         
         for tau in range(taumax):
             autocorrelation[tau] = np.mean([np.sum((self.prob_draws[i] - mean)*(self.prob_draws[(i+tau)%n_draws] - mean))*self.dm_vals for i in range(n_draws)])/N
-        
         return autocorrelation
     
     def autocorrelation(self):
@@ -983,7 +987,7 @@ class SE_Sampler:
         ax_ac.set_xlabel('$\\tau$')
         ax_ac.set_ylabel('$C(\\tau)$')
         ax_ac.grid(True,dashes=(1,3))
-        fig_ac.savefig(os.path.join(self.output_autocorrelation, 'autocorrelation_{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
+        fig_ac.savefig(Path(self.output_autocorrelation, 'autocorrelation_{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
         return
     
     def convergence_data(self):
@@ -1008,7 +1012,7 @@ class SE_Sampler:
         ax_conv.set_xlabel('$n$')
         ax_conv.set_ylabel('$D_{JS}(q_{n}(M), q_{n+1}(M))$')
         ax_conv.grid(True,dashes=(1,3))
-        fig_conv.savefig(os.path.join(self.output_convergence, 'convergence_data_{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
+        fig_conv.savefig(Path(self.output_convergence, 'convergence_data_{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
         return
         
     def convergence_true(self):
@@ -1025,7 +1029,7 @@ class SE_Sampler:
         ax_conv.set_xlabel('$n$')
         ax_conv.set_ylabel('$D_{JS}(q_{n}(M), q_{sim}(M))$')
         ax_conv.grid(True,dashes=(1,3))
-        fig_conv.savefig(os.path.join(self.output_convergence, 'convergence_true_{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
+        fig_conv.savefig(Path(self.output_convergence, 'convergence_true_{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
         return
         
     def run(self, args):
@@ -1077,6 +1081,11 @@ class SE_Sampler:
             self.glob_m_min = self.m_min
         if self.glob_m_max is None:
             self.glob_m_max = self.m_max
+        
+        # Check consistency
+        if real_masses is None and self.transformed:
+            raise ValueError('Samples are expected to be already transformed but no initial samples are provided.')
+            exit()
 
         if self.transformed:
             self.mass_samples = mass_samples
@@ -1192,11 +1201,10 @@ class MF_Sampler():
         self.alpha0 = alpha0
         # Miscellanea
         self.icn    = initial_cluster_number
-        self.states = []
         # Output
-        self.output_folder = output_folder
-        if not os.path.exists(self.output_folder):
-            os.mkdir(self.output_folder)
+        self.output_folder = Path(output_folder)
+        if not self.output_folder.exists():
+            self.output_folder.mkdir()
             
         self.mixture_samples = []
         self.n_clusters = []
@@ -1503,13 +1511,13 @@ class MF_Sampler():
         self.m_vals  = np.ascontiguousarray(app)
 
         # Saves interpolant functions into json file
-        name = os.path.join(self.output_folder, 'posterior_functions_mf_')
+        name = Path(self.output_folder, 'posterior_functions_mf_')
         extension ='.json'
         x = 0
-        fileName = name + str(x) + extension
+        fileName = Path(name, str(x), extension)
         while os.path.exists(fileName):
             x = x + 1
-            fileName = name + str(x) + extension
+            fileName = Path(name, str(x), extension)
         
         j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
         with open(fileName, 'w') as jsonfile:
@@ -1526,7 +1534,7 @@ class MF_Sampler():
         #saves median and CR
         self.median_mf = np.array(p[50])
         names = ['m'] + [str(perc) for perc in percentiles]
-        np.savetxt(os.path.join(self.output_folder, 'log_rec_obs_prob_mf.txt'), np.array([app, p[50], p[5], p[16], p[84], p[95]]).T, header = ' '.join(names))
+        np.savetxt(Path(self.output_folder, 'log_rec_obs_prob_mf.txt'), np.array([app, p[50], p[5], p[16], p[84], p[95]]).T, header = ' '.join(names))
         
         for perc in percentiles:
             p[perc] = np.exp(np.percentile(prob, perc, axis = 1))
@@ -1554,16 +1562,16 @@ class MF_Sampler():
         plt.savefig(self.output_folder + '/obs_mass_function.pdf', bbox_inches = 'tight')
         ax.set_yscale('log')
         ax.set_ylim(np.min(p[50]))
-        plt.savefig(os.path.join(self.output_folder, 'log_obs_mass_function.pdf'), bbox_inches = 'tight')
+        plt.savefig(Path(self.output_folder, 'log_obs_mass_function.pdf'), bbox_inches = 'tight')
         
         # saves mixture samples into json file
-        name = os.path.join(self.output_folder, '/posterior_mixtures_mf_')
+        name = Path(self.output_folder, '/posterior_mixtures_mf_')
         extension ='.json'
         x = 0
-        fileName = name + str(x) + extension
-        while os.path.exists(fileName):
+        fileName = Path(name, str(x), extension)
+        while fileName.exists():
             x = x + 1
-            fileName = name + str(x) + extension
+            fileName = Path(name, str(x), extension)
             
         j_dict = {str(i): sample for i, sample in enumerate(self.mixture_samples)}
         with open(fileName, 'w') as jsonfile:
@@ -1573,13 +1581,13 @@ class MF_Sampler():
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(np.arange(1,len(self.n_clusters)+1), self.n_clusters, ls = '--', marker = ',', linewidth = 0.5)
-        fig.savefig(os.path.join(self.output_folder, 'n_clusters_mf.pdf'), bbox_inches='tight')
+        fig.savefig(Path(self.output_folder, 'n_clusters_mf.pdf'), bbox_inches='tight')
         
         # plots concentration parameter
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))))
-        fig.savefig(os.path.join(self.output_folder, 'gamma_mf.pdf'), bbox_inches='tight')
+        fig.savefig(Path(self.output_folder, 'gamma_mf.pdf'), bbox_inches='tight')
         
         # if simulation, computes Jensen-Shannon distance
         if self.injected_density is not None:
@@ -1588,7 +1596,7 @@ class MF_Sampler():
             for perc in percentiles:
                 JSD[perc] = np.percentile(ent, perc, axis = 0)
             print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(*np.round((JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]), decimals = 3)))
-            np.savetxt(os.path.join(self.output_folder, 'JSD.txt'), np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
+            np.savetxt(Path(self.output_folder, 'JSD.txt'), np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
         
     
     def run(self):
@@ -1609,7 +1617,7 @@ class MF_Sampler():
         app  = np.linspace(self.m_min, self.m_max_plot, 1000)
         da = app[1]-app[0]
         try:
-            with open(os.path.join(self.output_folder, 'checkpoint.json'), 'r') as jsonfile:
+            with open(Path(self.output_folder, 'checkpoint.json'), 'r') as jsonfile:
                 samps = json.load(jsonfile)
         except:
             samps = {str(m):[] for m in app}
@@ -1623,7 +1631,7 @@ class MF_Sampler():
         # saves new samples
         for m, p in zip(app, prob):
             samps[str(m)] = samps[str(m)] + p
-        with open(os.path.join(self.output_folder, 'checkpoint.json'), 'w') as jsonfile:
+        with open(Path(self.output_folder, 'checkpoint.json'), 'w') as jsonfile:
             json.dump(samps, jsonfile)
 
     def run_sampling(self):
@@ -1671,7 +1679,7 @@ class MF_Sampler():
         ax_ac.set_xlabel('$\\tau$')
         ax_ac.set_ylabel('$C(\\tau)$')
         ax_ac.grid(True,dashes=(1,3))
-        fig_ac.savefig(os.path.join(self.output_folder, 'autocorrelation_mf.pdf'), bbox_inches = 'tight')
+        fig_ac.savefig(Path(self.output_folder, 'autocorrelation_mf.pdf'), bbox_inches = 'tight')
         return
     
     def convergence_data(self):
@@ -1696,7 +1704,7 @@ class MF_Sampler():
         ax_conv.set_xlabel('$n$')
         ax_conv.set_ylabel('$D_{JS}(q_{n}(M), q_{n+1}(M))$')
         ax_conv.grid(True,dashes=(1,3))
-        fig_conv.savefig(os.path.join(self.output_folder, 'convergence_data_mf.pdf'), bbox_inches = 'tight')
+        fig_conv.savefig(Path(self.output_folder, 'convergence_data_mf.pdf'), bbox_inches = 'tight')
         return
         
     def convergence_true(self):
@@ -1713,7 +1721,7 @@ class MF_Sampler():
         ax_conv.set_xlabel('$n$')
         ax_conv.set_ylabel('$D_{JS}(q_{n}(M), q_{sim}(M))$')
         ax_conv.grid(True,dashes=(1,3))
-        fig_conv.savefig(os.path.join(self.output_folder, 'convergence_true_mf.pdf'), bbox_inches = 'tight')
+        fig_conv.savefig(Path(self.output_folder, 'convergence_true_mf.pdf'), bbox_inches = 'tight')
         return
         
 @ray.remote
