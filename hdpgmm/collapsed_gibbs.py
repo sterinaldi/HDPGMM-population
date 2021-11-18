@@ -120,7 +120,7 @@ def my_student_t(df, t):
 class CGSampler:
     '''
     Class to analyse a set of mass posterior samples and reconstruct the mass distribution.
-    WARNING: despite being suitable to solve many different inference problems, this algorithm was implemented to infer the black hole mass function. Both variable names and documentation are written accordingly.
+    WARNING: despite being suitable to solve many different population inference problems, this algorithm was implemented to infer the black hole mass function. Both variable names and documentation are written accordingly.
     
     Arguments:
         :iterable events:               list of single-event posterior samples
@@ -390,35 +390,37 @@ class SE_Sampler:
     Class to reconstruct a posterior density function given samples.
     
     Arguments:
-        :iterable mass_samples:         mass samples (in probit or natural space)
-        :str event_id:                  name to be given to outputs
         :int burnin:                    number of steps to be discarded
         :int n_draws:                   number of posterior density draws
         :int n_steps:                   number of steps between draws
-        :iterable real_masses:          mass samples before coordinate change.
         :float alpha0:                  initial guess for concentration parameter
         :float a:                       hyperprior on Gamma shape parameter (for NIG)
         :float V:                       hyperprior on Normal std (for NIG)
-        :float m_min:                   mass prior lower bound for the specific event
-        :float m_max:                   mass prior upper bound for the specific event
-        :float t_min:                   prior lower bound in probit space
-        :float t_max:                   prior upper bound in probit space
         :float glob_m_max:              mass function prior upper bound (required for transforming back from probit space)
         :float glob_m_min:              mass function prior lower bound (required for transforming back from probit space)
         :str output_folder:             output folder
         :bool verbose:                  displays analysis progress status
+        :bool diagnostic:               run diagnostic routines
         :double initial_cluster_number: initial guess for the number of active clusters
         :double transformed:            mass samples are already in probit space
-        :bool diagnostic:               run diagnostic routines
-        :dict inj_post:                 injected posterior (interpolant)
-        :class np.random.RandomState:   RandomState (reproducibility)
+        :str var_symbol:                LaTeX-style quantity symbol, for plotting purposes
+        :str unit:                      LaTeX-style quantity unit, for plotting purposes. Use '' for dimensionless quantities
+        :float sigma_max:               maximum value for cluster standard deviation. If None, this quantity is inferred from the data
+        :iterable initial_assign:       initial guess for assignment. If None, samples are divided into N different adjacent chunks, where N is initial_cluster_number
+        :class np.random.RandomState:   RandomState (for reproducibility)
+        :bool hierarchical_flag:        marks if the class has been instantiated for a hierarchical inference
         
     Returns:
         :SE_Sampler: instance of SE_Sampler class
     
     Example:
+        from ray.utils import ActorPool
+        
         sampler = SE_Sampler(*args)
-        sampler.run()
+        pool = ActorPool([sampler])
+        for s in pool.map(lambda a, v: a.run.remote(v), [[transf_event, name, (mmin,mmax), event, injected, assignment]]):   # See run() documentation for parameters
+            bin.append(s)
+        
     '''
     def __init__(self, burnin,
                        n_draws,
@@ -506,33 +508,27 @@ class SE_Sampler:
         return new_samples
     
         
-    def initial_state(self, samples):
+    def initial_state(self):
         '''
-        Create initial state -  a dictionary that stores a number of useful variables
-        
-        Arguments:
-            :np.ndarray samples: transformed samples
-        
-        Returns:
-            :dict: new state. Entries are:
-                :list 'cluster_ids_':    list of labels for the maximum number of active cluster across the run
-                :np.ndarray 'data_':     transformed samples
-                :int 'num_clusters_':    number of active clusters
-                :double 'alpha_':        actual value of concentration parameter
-                :int 'Ntot':             total number of samples
-                :dict 'hyperparameters': parameters of the hyperpriors
-                :dict 'suffstats':       mean, variance and number of samples of each active cluster
-                :list 'assignment':      list of cluster assignments (one for each sample)
+        Creates initial state -  a dictionary that stores a number of useful variables.
+        Entries are:
+            :list 'cluster_ids_':    list of labels for the maximum number of active cluster across the run
+            :np.ndarray 'data_':     transformed samples
+            :int 'num_clusters_':    number of active clusters
+            :double 'alpha_':        actual value of concentration parameter
+            :int 'Ntot':             total number of samples
+            :dict 'hyperparameters': parameters of the hyperpriors
+            :dict 'suffstats':       mean, variance and number of samples of each active cluster
+            :list 'assignment':      list of cluster assignments (one for each sample)
         '''
         if self.initial_assign is None:
             assign = [int(a//(len(samples)/int(self.icn))) for a in range(len(samples))]
         else:
             assign = list(self.initial_assign)
         cluster_ids = list(np.arange(int(np.max(assign)+1)))
-        samp = np.copy(samples)
         state = {
             'cluster_ids_': cluster_ids,
-            'data_': samp,
+            'data_': self.mass_samples,
             'num_clusters_': int(self.icn),
             'alpha_': self.alpha0,
             'Ntot': len(samples),
@@ -545,31 +541,28 @@ class SE_Sampler:
             'suffstats': {cid: None for cid in cluster_ids},
             'assignment': assign
             }
-        self.update_suffstats(state)
-        return state
+        self.state = state
+        self.update_suffstats()
+        return
     
-    def update_suffstats(self, state):
+    def update_suffstats(self):
         '''
         Updates sufficient statistics for each cluster
-        
-        Arguments:
-            :dict state: the current state
         '''
-        for cluster_id, N in Counter(state['assignment']).items():
-            points_in_cluster = [x for x, cid in zip(state['data_'], state['assignment']) if cid == cluster_id]
+        for cluster_id, N in Counter(self.state['assignment']).items():
+            points_in_cluster = [x for x, cid in zip(self.state['data_'], self.state['assignment']) if cid == cluster_id]
             mean = np.array(points_in_cluster).mean()
             var  = np.array(points_in_cluster).var()
             M    = len(points_in_cluster)
-            state['suffstats'][cluster_id] = self.SuffStat(mean, var, M)
+            self.state['suffstats'][cluster_id] = self.SuffStat(mean, var, M)
     
-    def log_predictive_likelihood(self, data_id, cluster_id, state):
+    def log_predictive_likelihood(self, data_id, cluster_id):
         '''
         Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster - Eq. (2.30)
         
         Arguments:
             :int data_id:    index of the considered sample
             :int cluster_id: index of the considered cluster
-            :dict state:     current state
         
         Returns:
             :double: log Likelihood
@@ -577,17 +570,17 @@ class SE_Sampler:
         if cluster_id == "new":
             ss = self.SuffStat(0,0,0)
         else:
-            ss  = state['suffstats'][cluster_id]
+            ss  = self.state['suffstats'][cluster_id]
             
-        x = state['data_'][data_id]
+        x = self.state['data_'][data_id]
         mean = ss.mean
         sigma = ss.var
         N     = ss.N
         # Update hyperparameters
-        V_n  = 1/(1/state['hyperparameters_']["V"] + N)
-        mu_n = (state['hyperparameters_']["mu"]/state['hyperparameters_']["V"] + N*mean)*V_n
-        b_n  = state['hyperparameters_']["b"] + (state['hyperparameters_']["mu"]**2/state['hyperparameters_']["V"] + (sigma + mean**2)*N - mu_n**2/V_n)/2.
-        a_n  = state['hyperparameters_']["a"] + N/2.
+        V_n  = 1/(1/self.state['hyperparameters_']["V"] + N)
+        mu_n = (self.state['hyperparameters_']["mu"]/self.state['hyperparameters_']["V"] + N*mean)*V_n
+        b_n  = self.state['hyperparameters_']["b"] + (self.state['hyperparameters_']["mu"]**2/self.state['hyperparameters_']["V"] + (sigma + mean**2)*N - mu_n**2/V_n)/2.
+        a_n  = self.state['hyperparameters_']["a"] + N/2.
         # Update t-parameters
         t_sigma = np.sqrt(b_n*(1+V_n)/a_n)
         t_sigma = min([t_sigma, self.sigma_max])
@@ -633,118 +626,107 @@ class SE_Sampler:
             var = 0
         return self.SuffStat(mean, var, ss.N-1)
     
-    def cluster_assignment_distribution(self, data_id, state):
+    def cluster_assignment_distribution(self, data_id):
         """
         Compute the marginal distribution of cluster assignment
         for each cluster. Eq. (2.39)
         
         Arguments:
             :int data_id: sample index
-            :dict state:  current state
         
         Returns:
             :dict: p_i for each cluster
         """
         scores = {}
-        cluster_ids = list(state['suffstats'].keys()) + ['new']
+        cluster_ids = list(self.state['suffstats'].keys()) + ['new']
         for cid in cluster_ids:
-            scores[cid] = self.log_predictive_likelihood(data_id, cid, state)
-            scores[cid] += self.log_cluster_assign_score(cid, state)
+            scores[cid] = self.log_predictive_likelihood(data_id, cid, self.state)
+            scores[cid] += self.log_cluster_assign_score(cid, self.state)
         scores = {cid: np.exp(score) for cid, score in scores.items()}
         normalization = 1/sum(scores.values())
         scores = {cid: score*normalization for cid, score in scores.items()}
         return scores
 
-    def log_cluster_assign_score(self, cluster_id, state):
+    def log_cluster_assign_score(self, cluster_id):
         """
         Log-likelihood that a new point generated will
         be assigned to cluster_id given the current state. Eqs. (2.26) and (2.27)
         
         Arguments:
             :int cluster_id: index of the considered cluster
-            :dict state:     current state
         
         Returns:
             :double: log Likelihood
         """
         if cluster_id == "new":
-            return np.log(state["alpha_"])
+            return np.log(self.state["alpha_"])
         else:
-            return np.log(state['suffstats'][cluster_id].N)
+            return np.log(self.state['suffstats'][cluster_id].N)
 
-    def create_cluster(self, state):
+    def create_cluster(self):
         '''
         Creates a new cluster when a sample is assigned to "new".
-        
-        Arguments:
-            :dict state: current state to update
         
         Returns:
             :int: new cluster label
         '''
-        state["num_clusters_"] += 1
-        cluster_id = max(state['suffstats'].keys()) + 1
-        state['suffstats'][cluster_id] = self.SuffStat(0, 0, 0)
-        state['cluster_ids_'].append(cluster_id)
+        self.state["num_clusters_"] += 1
+        cluster_id = max(self.state['suffstats'].keys()) + 1
+        self.state['suffstats'][cluster_id] = self.SuffStat(0, 0, 0)
+        self.state['cluster_ids_'].append(cluster_id)
         return cluster_id
 
-    def destroy_cluster(self, state, cluster_id):
+    def destroy_cluster(self, cluster_id):
         """
         Removes an empty cluster
         
         Arguments:
-            :dict state:     current state to update
             :int cluster_id: label of the target empty cluster
         """
-        state["num_clusters_"] -= 1
-        del state['suffstats'][cluster_id]
-        state['cluster_ids_'].remove(cluster_id)
+        self.state["num_clusters_"] -= 1
+        del self.state['suffstats'][cluster_id]
+        self.state['cluster_ids_'].remove(cluster_id)
         
-    def prune_clusters(self,state):
+    def prune_clusters(self):
         """
         Selects empty cluster(s) and removes them.
-        
-        Arguments:
-            :dict state: current state to update
         """
-        for cid in state['cluster_ids_']:
-            if state['suffstats'][cid].N == 0:
-                self.destroy_cluster(state, cid)
+        for cid in self.state['cluster_ids_']:
+            if self.state['suffstats'][cid].N == 0:
+                self.destroy_cluster(cid)
 
-    def sample_assignment(self, data_id, state):
+    def sample_assignment(self, data_id):
         """
         Samples new assignment from marginal distribution.
         If cluster is "new", creates a new cluster.
         
         Arguments:
             :int data_id: index of the sample to be assigned
-            :dict state:  current state
         
         Returns:
             :int: index of the selected cluster
         """
-        scores = self.cluster_assignment_distribution(data_id, state).items()
+        scores = self.cluster_assignment_distribution(data_id).items()
         labels, scores = zip(*scores)
         cid = self.rdstate.choice(labels, p=scores)
         if cid == "new":
-            return self.create_cluster(state)
+            return self.create_cluster()
         else:
             return int(cid)
 
-    def update_alpha(self, state, burnin = 200):
+    def update_alpha(self, burnin = 200):
         '''
         Updates concentration parameter using a Metropolis-Hastings sampling scheme.
         
         Arguments:
-            :dict state: current state
             :int burnin: MH burnin
         
         Returns:
             :double: new concentration parametere value
         '''
-        a_old = state['alpha_']
-        n     = state['Ntot']
-        K     = len(state['cluster_ids_'])
+        a_old = self.state['alpha_']
+        n     = self.state['Ntot']
+        K     = len(self.state['cluster_ids_'])
         for _ in range(burnin+self.rdstate.randint(100)):
             a_new = a_old + self.rdstate.uniform(-1,1)*0.5
             if a_new > 0:
@@ -754,7 +736,7 @@ class SE_Sampler:
                     a_old = a_new
         return a_old
 
-    def gibbs_step(self, state):
+    def gibbs_step(self):
         """
         Computes a single Gibbs step (updates all the sample assignments using conditional probabilities)
         
@@ -762,36 +744,33 @@ class SE_Sampler:
             :dict state: current state to update
         """
         # alpha sampling
-        state['alpha_'] = self.update_alpha(state)
-        self.alpha_samples.append(state['alpha_'])
-        pairs = zip(state['data_'], state['assignment'])
+        state['alpha_'] = self.update_alpha()
+        self.alpha_samples.append(self.state['alpha_'])
+        pairs = zip(self.state['data_'], self.state['assignment'])
         for data_id, (datapoint, cid) in enumerate(pairs):
-            state['suffstats'][cid] = self.remove_datapoint_from_suffstats(datapoint, state['suffstats'][cid])
-            self.prune_clusters(state)
-            cid = self.sample_assignment(data_id, state)
-            state['assignment'][data_id] = cid
-            state['suffstats'][cid] = self.add_datapoint_to_suffstats(state['data_'][data_id], state['suffstats'][cid])
-        self.n_clusters.append(len(state['cluster_ids_']))
+            self.state['suffstats'][cid] = self.remove_datapoint_from_suffstats(datapoint, self.state['suffstats'][cid])
+            self.prune_clusters()
+            cid = self.sample_assignment(data_id)
+            self.state['assignment'][data_id] = cid
+            self.state['suffstats'][cid] = self.add_datapoint_to_suffstats(self.state['data_'][data_id], self.state['suffstats'][cid])
+        self.n_clusters.append(len(self.state['cluster_ids_']))
     
-    def sample_mixture_parameters(self, state):
+    def sample_mixture_parameters(self):
         '''
         Draws a mixture sample (weights, means and variances) using conditional probabilities. Eqs. (3.2) and (3.3)
-        
-        Arguments:
-            :dict state: current state
         '''
-        ss = state['suffstats']
-        alpha = [ss[cid].N + state['alpha_'] / state['num_clusters_'] for cid in state['cluster_ids_']]
+        ss = self.state['suffstats']
+        alpha = [ss[cid].N + self.state['alpha_'] / self.state['num_clusters_'] for cid in self.state['cluster_ids_']]
         weights = self.rdstate.dirichlet(alpha).flatten()
         components = {}
-        for i, cid in enumerate(state['cluster_ids_']):
+        for i, cid in enumerate(self.state['cluster_ids_']):
             mean = ss[cid].mean
             sigma = ss[cid].var
             N     = ss[cid].N
-            V_n  = 1/(1/state['hyperparameters_']["V"] + N)
-            mu_n = (state['hyperparameters_']["mu"]/state['hyperparameters_']["V"] + N*mean)*V_n
-            b_n  = state['hyperparameters_']["b"] + (state['hyperparameters_']["mu"]**2/state['hyperparameters_']["V"] + (sigma + mean**2)*N - mu_n**2/V_n)/2.
-            a_n  = state['hyperparameters_']["a"] + N/2.
+            V_n  = 1/(1/self.state['hyperparameters_']["V"] + N)
+            mu_n = (self.state['hyperparameters_']["mu"]/self.state['hyperparameters_']["V"] + N*mean)*V_n
+            b_n  = self.state['hyperparameters_']["b"] + (self.state['hyperparameters_']["mu"]**2/self.state['hyperparameters_']["V"] + (sigma + mean**2)*N - mu_n**2/V_n)/2.
+            a_n  = self.state['hyperparameters_']["a"] + N/2.
             # Update t-parameters
             s = stats.invgamma(a_n, scale = b_n).rvs(random_state = self.rdstate)
             m = stats.norm(mu_n, s*V_n).rvs(random_state = self.rdstate)
@@ -802,21 +781,21 @@ class SE_Sampler:
         """
         Runs the sampling algorithm - Listing 1
         """
-        state = self.initial_state(self.mass_samples)
+        self.initial_state()
         if self.diagnostic:
-            self.sample_mixture_parameters(state)
+            self.sample_mixture_parameters()
         for i in range(self.burnin):
             if self.verbose:
                 print('\rBURN-IN: {0}/{1}'.format(i+1, self.burnin), end = '')
-            self.gibbs_step(state)
+            self.gibbs_step()
         if self.verbose:
             print('\n', end = '')
         for i in range(self.n_draws):
             if self.verbose:
                 print('\rSAMPLING: {0}/{1}'.format(i+1, self.n_draws), end = '')
             for _ in range(self.n_steps):
-                self.gibbs_step(state)
-            self.sample_mixture_parameters(state)
+                self.gibbs_step()
+            self.sample_mixture_parameters()
         if self.verbose:
             print('\n', end = '')
         return
@@ -1249,22 +1228,17 @@ class MF_Sampler():
     def initial_state(self):
         '''
         Create initial state -  a dictionary that stores a number of useful variables
-        
-        Arguments:
-            :np.ndarray samples: transformed samples
-        
-        Returns:
-            :dict: new state. Entries are:
-                :list 'cluster_ids_':    list of active cluster labels
-                :np.ndarray 'data_':     transformed samples
-                :int 'num_clusters_':    number of active clusters
-                :double 'alpha_':        actual value of concentration parameter
-                :int 'Ntot':             total number of samples
-                :dict 'hyperparameters': parameters of the hyperpriors
-                :dict 'suffstats':       mean, variance and number of samples of each active cluster
-                :list 'assignment':      list of cluster assignments (one for each sample)
-                :dict 'ev_in_cl':        list of sample indices assigned to each cluster
-                :dict logL_D:            log-Likelihood for samples in cluster
+        Entries are:
+            :list 'cluster_ids_':    list of active cluster labels
+            :np.ndarray 'data_':     transformed samples
+            :int 'num_clusters_':    number of active clusters
+            :double 'alpha_':        actual value of concentration parameter
+            :int 'Ntot':             total number of samples
+            :dict 'hyperparameters': parameters of the hyperpriors
+            :dict 'suffstats':       mean, variance and number of samples of each active cluster
+            :list 'assignment':      list of cluster assignments (one for each sample)
+            :dict 'ev_in_cl':        list of sample indices assigned to each cluster
+            :dict 'logL_D':            log-Likelihood for samples in cluster
         '''
         self.update_draws()
         assign = [int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))]
@@ -1284,7 +1258,8 @@ class MF_Sampler():
             n = len(events)
             state['logL_D'][cid] = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max)
         state['logL_D']["new"] = self.log_numerical_predictive([], self.t_min, self.t_max, self.sigma_min, self.sigma_max)
-        return state
+        self.state = state
+        return
 
     def log_numerical_predictive(self, events, t_min, t_max, sigma_min, sigma_max):
         """"
@@ -1303,20 +1278,19 @@ class MF_Sampler():
         I, dI = dblquad(integrand, t_min, t_max, gfun = sigma_min, hfun = sigma_max, args = [events, logU])
         return np.log(I) + logU
     
-    def cluster_assignment_distribution(self, data_id, state):
+    def cluster_assignment_distribution(self, data_id):
         """
         Compute the marginal distribution of cluster assignment
         for each cluster. Eq. (2.39)
         
         Arguments:
             :int data_id: sample index
-            :dict state:  current state
         
         Returns:
             :dict: p_i for each cluster
         """
-        cluster_ids = list(state['ev_in_cl'].keys()) + ['new']
-        output = self.p.map(lambda a, v: a.compute_score.remote(v), [[data_id, cid, state, self.posterior_draws] for cid in cluster_ids])
+        cluster_ids = list(self.state['ev_in_cl'].keys()) + ['new']
+        output = self.p.map(lambda a, v: a.compute_score.remote(v), [[data_id, cid, self.state, self.posterior_draws] for cid in cluster_ids])
         scores = {}
         for out in output:
             scores[out[0]] = out[1]
@@ -1325,67 +1299,59 @@ class MF_Sampler():
         scores = {cid: score*normalization for cid, score in scores.items()}
         return scores
 
-    def create_cluster(self, state):
+    def create_cluster(self):
         '''
         Creates a new cluster when a sample is assigned to "new".
-        
-        Arguments:
-            :dict state: current state to update
         
         Returns:
             :int: new cluster label
         '''
-        state["num_clusters_"] += 1
-        cluster_id = max(state['cluster_ids_']) + 1
-        state['cluster_ids_'].append(cluster_id)
-        state['ev_in_cl'][cluster_id] = []
+        self.state["num_clusters_"] += 1
+        cluster_id = max(self.state['cluster_ids_']) + 1
+        self.state['cluster_ids_'].append(cluster_id)
+        self.state['ev_in_cl'][cluster_id] = []
         return cluster_id
 
-    def destroy_cluster(self, state, cluster_id):
+    def destroy_cluster(self, cluster_id):
         """
         Removes an empty cluster
         
         Arguments:
-            :dict state:     current state to update
             :int cluster_id: label of the target empty cluster
         """
-        state["num_clusters_"] -= 1
-        state['cluster_ids_'].remove(cluster_id)
-        state['ev_in_cl'].pop(cluster_id)
+        self.state["num_clusters_"] -= 1
+        self.state['cluster_ids_'].remove(cluster_id)
+        self.state['ev_in_cl'].pop(cluster_id)
         
-    def prune_clusters(self,state):
+    def prune_clusters(self):
         """
         Selects empty cluster(s) and removes them.
-        
-        Arguments:
-            :dict state: current state to update
         """
-        for cid in state['cluster_ids_']:
-            if len(state['ev_in_cl'][cid]) == 0:
-                self.destroy_cluster(state, cid)
+        for cid in self.state['cluster_ids_']:
+            if len(self.state['ev_in_cl'][cid]) == 0:
+                self.destroy_cluster(cid)
 
-    def sample_assignment(self, data_id, state):
+    def sample_assignment(self, data_id):
         """
         Samples new assignment from marginal distribution.
         If cluster is "new", creates a new cluster.
         
         Arguments:
             :int data_id: index of the sample to be assigned
-            :dict state:  current state
         
         Returns:
             :int: index of the selected cluster
         """
         self.numerators = {}
-        scores = self.cluster_assignment_distribution(data_id, state).items()
+        scores = self.cluster_assignment_distribution(data_id).items()
         labels, scores = zip(*scores)
         cid = self.rdstate.choice(labels, p=scores)
         if cid == "new":
-            new_cid = self.create_cluster(state)
-            state['logL_D'][int(new_cid)] = self.numerators[cid]
+            new_cid = self.create_cluster()
+            self.state['logL_D'][int(new_cid)] = self.numerators[cid]
             return new_cid
         else:
-            state['logL_D'][int(cid)] = self.numerators[int(cid)]
+            self.state['logL_D'][int(cid)] = self.numerators[int(cid)]
             return int(cid)
 
     def update_draws(self):
@@ -1398,45 +1364,42 @@ class MF_Sampler():
             draws.append(posterior_samples[random.randint(len(posterior_samples))])
         self.posterior_draws = draws
     
-    def drop_from_cluster(self, state, data_id, cid):
+    def drop_from_cluster(self, data_id, cid):
         """
         Removes a sample from a cluster.
         
         Arguments:
-            :dict state: current state
             :data_id:    sample index
             :cid:        cluster index
         """
-        state['ev_in_cl'][cid].remove(data_id)
-        events = [self.posterior_draws[i] for i in state['ev_in_cl'][cid]]
+        self.state['ev_in_cl'][cid].remove(data_id)
+        events = [self.posterior_draws[i] for i in self.state['ev_in_cl'][cid]]
         n = len(events)
-        state['logL_D'][cid] = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max)
+        self.state['logL_D'][cid] = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max)
 
-    def add_to_cluster(self, state, data_id, cid):
+    def add_to_cluster(self, data_id, cid):
         """
         Adds a sample to a cluster.
         
         Arguments:
-            :dict state: current state
             :data_id:    sample index
             :cid:        cluster index
         """
-        state['ev_in_cl'][cid].append(data_id)
+        self.state['ev_in_cl'][cid].append(data_id)
 
-    def update_alpha(self, state, burnin = 200):
+    def update_alpha(self, burnin = 200):
         '''
         Updates concentration parameter using a Metropolis-Hastings sampling scheme.
         
         Arguments:
-            :dict state: current state
             :int burnin: MH burnin
         
         Returns:
             :double: new concentration parametere value
         '''
-        a_old = state['alpha_']
-        n     = state['Ntot']
-        K     = len(state['cluster_ids_'])
+        a_old = self.state['alpha_']
+        n     = self.state['Ntot']
+        K     = len(self.state['cluster_ids_'])
         for _ in range(burnin+self.rdstate.randint(100)):
             a_new = a_old + self.rdstate.uniform(-1,1)*0.5
             if a_new > 0:
@@ -1446,37 +1409,31 @@ class MF_Sampler():
                     a_old = a_new
         return a_old
     
-    def gibbs_step(self, state):
+    def gibbs_step(self):
         """
         Computes a single Gibbs step (updates all the sample assignments using conditional probabilities)
-        
-        Arguments:
-            :dict state: current state to update
         """
         self.update_draws()
-        state['alpha_'] = self.update_alpha(state)
-        self.alpha_samples.append(state['alpha_'])
-        pairs = zip(state['data_'], state['assignment'])
+        self.state['alpha_'] = self.update_alpha()
+        self.alpha_samples.append(self.state['alpha_'])
+        pairs = zip(self.state['data_'], self.state['assignment'])
         for data_id, (datapoint, cid) in enumerate(pairs):
-            self.drop_from_cluster(state, data_id, cid)
-            self.prune_clusters(state)
-            cid = self.sample_assignment(data_id, state)
-            self.add_to_cluster(state, data_id, cid)
-            state['assignment'][data_id] = cid
-        self.n_clusters.append(len(state['cluster_ids_']))
+            self.drop_from_cluster(data_id, cid)
+            self.prune_clusters()
+            cid = self.sample_assignment(data_id)
+            self.add_to_cluster(data_id, cid)
+            self.state['assignment'][data_id] = cid
+        self.n_clusters.append(len(self.state['cluster_ids_']))
     
-    def sample_mixture_parameters(self, state):
+    def sample_mixture_parameters(self):
         '''
         Draws a mixture sample (weights, means and std) using conditional probabilities. Eq. (3.7)
-        
-        Arguments:
-            :dict state: current state
         '''
-        alpha = [len(state['ev_in_cl'][cid]) + state['alpha_'] / state['num_clusters_'] for cid in state['cluster_ids_']]
+        alpha = [len(self.state['ev_in_cl'][cid]) + self.state['alpha_'] / self.state['num_clusters_'] for cid in self.state['cluster_ids_']]
         weights = self.rdstate.dirichlet(alpha).flatten()
         components = {}
-        for i, cid in enumerate(state['cluster_ids_']):
-            events = [self.posterior_draws[j] for j in state['ev_in_cl'][cid]]
+        for i, cid in enumerate(self.state['cluster_ids_']):
+            events = [self.posterior_draws[j] for j in self.state['ev_in_cl'][cid]]
             m, s = sample_point(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max, burnin = 1000, rdstate = self.rdstate)
             components[i] = {'mean': m, 'sigma': s, 'weight': weights[i]}
         self.mixture_samples.append(components)
@@ -1638,16 +1595,16 @@ class MF_Sampler():
         """
         Runs the sampling algorithm - Listing 2
         """
-        self.state = self.initial_state()
+        self.initial_state()
         for i in range(self.burnin):
             print('\rBURN-IN MF: {0}/{1}'.format(i+1, self.burnin), end = '')
-            self.gibbs_step(self.state)
+            self.gibbs_step()
         print('\n', end = '')
         for i in range(self.n_draws):
             print('\rSAMPLING MF: {0}/{1}'.format(i+1, self.n_draws), end = '')
             for _ in range(self.n_steps):
-                self.gibbs_step(self.state)
-            self.sample_mixture_parameters(self.state)
+                self.gibbs_step()
+            self.sample_mixture_parameters()
             if (i+1) % self.ncheck == 0:
                 self.checkpoint()
         print('\n', end = '')
@@ -1776,7 +1733,7 @@ class ScoreComputer:
         else:
             if len(state['ev_in_cl'][cluster_id]) == 0:
                 return -np.inf
-            return np.log(len(state['ev_in_cl'][cluster_id]))
+            return np.log(len(self.state['ev_in_cl'][cluster_id]))
 
     def log_predictive_likelihood(self, data_id, cluster_id, state, posterior_draws):
         '''
