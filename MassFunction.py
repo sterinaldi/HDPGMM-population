@@ -250,8 +250,8 @@ def main():
     parser.add_option("--unit", type = "string", dest = "unit", help = "LaTeX-style quantity unit, for plotting purposes. Use '' for dimensionless quantities", default = 'M_{\\odot}')
     
     # Settings
-    parser.add_option("--samp_settings", type = "string", dest = "samp_settings", help = "Burnin, samples and step for MF sampling", default = '10,1000,1')
-    parser.add_option("--samp_settings_ev", type = "string", dest = "samp_settings_ev", help = "Burnin, samples and step for single event sampling. If None, uses MF settings")
+    parser.add_option("--samp_settings", type = "string", dest = "samp_settings", help = "Burnin, number of draws and number of steps between draws for mass function sampling", default = '10,1000,1')
+    parser.add_option("--samp_settings_ev", type = "string", dest = "samp_settings_ev", help = "Burnin, number of draws and number of steps between draws for single event sampling. If None, uses MF settings", default = None)
     parser.add_option("--icn", dest = "initial_cluster_number", type = "float", help = "Initial cluster number", default = 5.)
     parser.add_option("--nthreads", dest = "n_parallel_threads", type = "int", help = "Number of parallel threads to spawn", default = 8)
     parser.add_option("-e", "--processed_events", dest = "process_events", action = 'store_false', default = True, help = "Disables event processing")
@@ -386,7 +386,6 @@ def main():
         json_dict = json.load(openfile)
         samples = np.array([np.array(d) for d in json_dict.values()]).T
         openfile.close()
-        print(samples.shape)
         for s in samples:
             samples_set.append(s)
     samples_set = np.array(samples_set)

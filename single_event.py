@@ -76,7 +76,7 @@ def main():
     parser.add_option("--unit", type = "string", dest = "unit", help = "LaTeX-style quantity unit, for plotting purposes. Use '' for dimensionless quantities", default = 'M_{\\odot}')
     
     # Settings
-    parser.add_option("--samp_settings", type = "string", dest = "samp_settings", help = "Burnin, samples and step", default = '10,1000,1')
+    parser.add_option("--samp_settings", type = "string", dest = "samp_settings", help = "Burnin, number of draws and number of steps between draws", default = '10,1000,1')
     parser.add_option("--icn", dest = "initial_cluster_number", type = "float", help = "Initial cluster number", default = 5.)
     parser.add_option("-d", "--diagnostic", dest = "diagnostic", action = 'store_true', default = False, help = "Run diagnostic routines (Autocorrelation, quasi-convergence)")
     parser.add_option("-s", "--seed", dest = "seed", type = "float", default = 0, help = "Fix seed for reproducibility")
@@ -125,7 +125,7 @@ def main():
     # Reads hyperpriors and sampling settings
     if options.prior is not None:
         options.a, options.V = [float(x) for x in options.prior.split(',')]
-    options.burnin, options.n_draws, options.step = (int(x) for x in options.samp_settings.split(','))
+    options.burnin, options.n_draws, options.n_steps = (int(x) for x in options.samp_settings.split(','))
     
     # Read cosmology
     options.h, options.om, options.ol = (float(x) for x in options.cosmology.split(','))
@@ -160,7 +160,7 @@ def main():
     sampler = HDPGMM.SE_Sampler.remote(
                                 burnin = int(options.burnin),
                                 n_draws = int(options.n_draws),
-                                step = int(options.step),
+                                n_steps = int(options.n_steps),
                                 alpha0 = float(options.alpha0),
                                 a = float(options.a),
                                 V = float(options.V),

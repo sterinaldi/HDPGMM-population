@@ -170,12 +170,12 @@ class CGSampler:
                        ):
         
         # Settings
-        self.burnin_mf, self.n_draws_mf, self.step_mf = samp_settings
+        self.burnin_mf, self.n_draws_mf, self.n_steps_mf = samp_settings
         
         if samp_settings_ev is not None:
-            self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings_ev
+            self.burnin_ev, self.n_draws_ev, self.n_steps_ev = samp_settings_ev
         else:
-            self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings
+            self.burnin_ev, self.n_draws_ev, self.n_steps_ev = samp_settings
             
         self.verbose            = verbose
         self.diagnostic         = diagnostic
@@ -268,7 +268,7 @@ class CGSampler:
             event_samplers.append(SE_Sampler.remote(
                                             burnin        = self.burnin_ev,
                                             n_draws       = self.n_draws_ev,
-                                            step          = self.step_ev,
+                                            n_steps       = self.n_steps_ev,
                                             alpha0        = self.alpha0,
                                             a             = self.a_ev,
                                             V             = self.V_ev,
@@ -324,7 +324,7 @@ class CGSampler:
         print('Hyperparameters: a = {0}, V = {1}'.format(self.a, self.V))
         print('{0} between {1} {3} and {2} {3}'.format(self.var_symbol, self.glob_m_min, self.glob_m_max, self.unit))
         print('Burn-in: {0} samples'.format(self.burnin_mf))
-        print('Samples: {0} - 1 every {1}'.format(self.n_draws_mf, self.step_mf))
+        print('Samples: {0} - 1 every {1}'.format(self.n_draws_mf, self.n_steps_mf))
         print('Verbosity: {0} Diagnostic: {1} Reproducible run: {2}'.format(self.verbose, self.diagnostic, bool(self.seed)))
         print('------------------------')
         return
@@ -342,7 +342,7 @@ class CGSampler:
                        posterior_functions_events = self.posterior_functions_events,
                        burnin                     = self.burnin_mf,
                        n_draws                    = self.n_draws_mf,
-                       step                       = self.step_mf,
+                       n_steps                    = self.n_steps_mf,
                        alpha0                     = self.gamma0,
                        m_min                      = self.m_min,
                        m_max                      = self.m_max,
@@ -391,7 +391,7 @@ class SE_Sampler:
         :str event_id:                  name to be given to outputs
         :int burnin:                    number of steps to be discarded
         :int n_draws:                   number of posterior density draws
-        :int step:                      number of steps between draws
+        :int n_steps:                   number of steps between draws
         :iterable real_masses:          mass samples before coordinate change.
         :float alpha0:                  initial guess for concentration parameter
         :float a:                       hyperprior on Gamma shape parameter (for NIG)
@@ -419,7 +419,7 @@ class SE_Sampler:
     '''
     def __init__(self, burnin,
                        n_draws,
-                       step,
+                       n_steps,
                        alpha0 = 1,
                        a = 3,
                        V = 1/4.,
@@ -444,7 +444,7 @@ class SE_Sampler:
         
         self.burnin  = burnin
         self.n_draws = n_draws
-        self.step    = step
+        self.n_steps = n_steps
         
         self.glob_m_min = glob_m_min
         self.glob_m_max = glob_m_max
@@ -807,7 +807,7 @@ class SE_Sampler:
         for i in range(self.n_draws):
             if self.verbose:
                 print('\rSAMPLING: {0}/{1}'.format(i+1, self.n_draws), end = '')
-            for _ in range(self.step):
+            for _ in range(self.n_steps):
                 self.gibbs_step(state)
             self.sample_mixture_parameters(state)
         if self.verbose:
@@ -1138,7 +1138,7 @@ class MF_Sampler():
     def __init__(self, posterior_functions_events,
                        burnin,
                        n_draws,
-                       step,
+                       n_steps,
                        alpha0 = 1,
                        m_min = 5,
                        m_max = 50,
@@ -1167,7 +1167,7 @@ class MF_Sampler():
         
         self.burnin  = burnin
         self.n_draws = n_draws
-        self.step    = step
+        self.n_steps = n_steps
         self.m_min   = m_min
         self.m_max   = m_max
         if transformed:
@@ -1631,7 +1631,7 @@ class MF_Sampler():
         print('\n', end = '')
         for i in range(self.n_draws):
             print('\rSAMPLING MF: {0}/{1}'.format(i+1, self.n_draws), end = '')
-            for _ in range(self.step):
+            for _ in range(self.n_steps):
                 self.gibbs_step(self.state)
             self.sample_mixture_parameters(self.state)
             if (i+1) % self.ncheck == 0:
