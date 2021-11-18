@@ -14,6 +14,7 @@ from scipy.spatial.distance import jensenshannon as js
 from hdpgmm.preprocessing import load_single_event
 import ray
 from ray.util import ActorPool
+from pathlib import Path
 
 rcParams["text.usetex"] = True
 rcParams["font.serif"] = "Computer Modern"
@@ -95,12 +96,12 @@ def main():
     (options, args) = parser.parse_args()
     
     # Converts relative paths to absolute paths
-    options.event_file = os.path.abspath(str(options.event_file))
-    options.output     = os.path.abspath(str(options.output))
+    options.event_file = Path(str(options.event_file)).absolute()
+    options.output     = Path(str(options.output)).absolute()
     if options.inj_file is not None:
-        options.inj_file = os.path.abspath(str(options.inj_file))
+        options.inj_file = Path(str(options.inj_file)).absolute()
     if options.assign_file is not None:
-        options.assign_file = os.path.abspath(str(options.assign_file))
+        options.assign_file = Path(str(options.assign_file)).absolute()
     
     # If provided, reads optfile. Command-line inputs override file options.
     if options.optfile is not None:

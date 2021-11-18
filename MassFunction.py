@@ -13,6 +13,7 @@ from scipy.special import logsumexp
 from scipy.spatial.distance import jensenshannon as js
 from hdpgmm.preprocessing import load_data
 from distutils.spawn import find_executable
+from pathlib import Path
 
 if find_executable('latex'):
     rcParams["text.usetex"] = True
@@ -101,7 +102,7 @@ def plot_samples(samples, m_min, m_max, output, symbol, unit, injected_density =
     
     # saves median and CR
     names = ['m'] + [str(perc) for perc in percentiles]
-    np.savetxt(output+ '/log_joint_obs_prob_mf.txt', np.array([app, p[50] - log_norm, p[5] - log_norm, p[16] - log_norm, p[84] - log_norm, p[95] - log_norm]).T, header = ' '.join(names))
+    np.savetxt(Path(output, '/log_joint_obs_prob_mf.txt'), np.array([app, p[50] - log_norm, p[5] - log_norm, p[16] - log_norm, p[84] - log_norm, p[95] - log_norm]).T, header = ' '.join(names))
     
     for perc in percentiles:
         p[perc] = np.exp(np.percentile(prob, perc, axis = 1))
@@ -123,7 +124,7 @@ def plot_samples(samples, m_min, m_max, output, symbol, unit, injected_density =
         for perc in percentiles:
             JSD[perc] = np.percentile(ent, perc, axis = 0)
         print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(*np.round((JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]), decimals = 3)))
-        np.savetxt(output + '/joint_JSD.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
+        np.savetxt(Path(output, '/joint_JSD.txt'), np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
     
     # as above, accounting for selection effects (observed distribution)
     if filtered_density is not None:
@@ -137,7 +138,7 @@ def plot_samples(samples, m_min, m_max, output, symbol, unit, injected_density =
         for perc in percentiles:
             JSD[perc] = np.percentile(ent, perc)
         print('Jensen-Shannon distance: {0}+{1}-{2} nats (filtered)'.format(*np.round((JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]), decimals = 3)))
-        np.savetxt(output + '/filtered_joint_relative_entropy.txt', np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
+        np.savetxt(Path(output, '/filtered_joint_relative_entropy.txt'), np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
     
     # Maquillage
     ax.grid(True,dashes=(1,3))
@@ -147,7 +148,7 @@ def plot_samples(samples, m_min, m_max, output, symbol, unit, injected_density =
     plt.savefig(output + '/joint_mass_function.pdf', bbox_inches = 'tight')
     ax.set_yscale('log')
     ax.set_ylim(np.min(p[50]))
-    plt.savefig(output + '/log_joint_mass_function.pdf', bbox_inches = 'tight')
+    plt.savefig(Path(output,'/log_joint_mass_function.pdf'), bbox_inches = 'tight')
 
 def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, symbol, unit, inj_density = None):
     """
@@ -176,7 +177,7 @@ def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, sym
     # Saves astrophysical samples
     
     j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
-    jsonfile = open(output + '/astro_posteriors.json', 'w')
+    jsonfile = open(Path(output,'/astro_posteriors.json'), 'w')
     json.dump(j_dict, jsonfile)
     jsonfile.close()
     
@@ -190,7 +191,7 @@ def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, sym
     
     # Saves median and CR
     names = ['m']+[str(perc) for perc in percentiles]
-    np.savetxt(output + '/log_rec_prob_mf.txt',  np.array([app, mf[50], mf[5], mf[16], mf[84], mf[95]]).T, header = ' '.join(names))
+    np.savetxt(Path(output, '/log_rec_prob_mf.txt'),  np.array([app, mf[50], mf[5], mf[16], mf[84], mf[95]]).T, header = ' '.join(names))
 
     fig = plt.figure()
     ax  = fig.add_subplot(111)
@@ -217,7 +218,7 @@ def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, sym
     plt.savefig(output + '/mass_function.pdf', bbox_inches = 'tight')
     ax.set_yscale('log')
     ax.set_ylim([1e-3,10])
-    plt.savefig(output + '/log_mass_function.pdf', bbox_inches = 'tight')
+    plt.savefig(Path(output, '/log_mass_function.pdf'), bbox_inches = 'tight')
 
 def save_options(options):
     """
@@ -226,7 +227,7 @@ def save_options(options):
     Arguments:
         :dict options: options
     """
-    logfile = open(options.output + '/options_log.txt', 'w')
+    logfile = open(path(options.output, '/options_log.txt'), 'w')
     for key, val in zip(vars(options).keys(), vars(options).values()):
         logfile.write('{0}: {1}\n'.format(key,val))
     logfile.close()
@@ -274,10 +275,10 @@ def main():
     (options, args) = parser.parse_args()
     
     # Converts relative paths to absolute paths
-    options.events_path   = os.path.abspath(options.events_path)
-    options.output        = os.path.abspath(options.output)
+    options.events_path   = Path(options.events_path).absolute()
+    options.output        = Path(options.output).absolute()
     if options.se_inj_folder is not None:
-        options.se_inj_folder = os.path.abspath(options.se_inj_folder)
+        options.se_inj_folder = Path(options.se_inj_folder).absolute()
     
     # If provided, reads optfile. Command-line inputs override file options.
     if options.optfile is not None:
@@ -314,7 +315,7 @@ def main():
     inj_post = {}
     for name in names:
         if options.se_inj_folder is not None:
-            post = np.genfromtxt(options.se_inj_folder + '/' + name + '.txt', names = True)
+            post = np.genfromtxt(Path(options.se_inj_folder, name, '.txt'), names = True)
             inj_post[name] = interp1d(post['m'], post['p'], bounds_error = False, fill_value = (post['p'][0], post['p'][-1]))
         else:
             inj_post[name] = None
@@ -337,7 +338,7 @@ def main():
             spec.loader.exec_module(sf_module)
             sel_func = sf_module.selection_function
         else:
-            sf = np.genfromtxt(options.selection_function)
+            sf = np.genfromtxt(Path(options.selection_function))
             sel_func = interp1d(sf[:,0], sf[:,1], bounds_error = False, fill_value = (sf[:,1][0],sf[:,1][-1]))
     
     # Observed density
@@ -377,8 +378,8 @@ def main():
     
     # Joins samples from different runs
     samples = []
-    json_folder = options.output + '/mass_function/'
-    json_files  = [json_folder + f for f in os.listdir(json_folder) if (f.startswith('posterior_functions_'))]
+    json_folder = Path(options.output, 'mass_function')
+    json_files  = [Path(json_folder, f) for f in os.listdir(json_folder) if (f.startswith('posterior_functions_'))]
     
     samples_set = []
     for file in json_files:
@@ -393,7 +394,7 @@ def main():
     
     # Saves all samples in a single file
     j_dict = {str(mi): list(draws) for mi, draws in zip(m, samples_set.T)}
-    jsonfile = open(json_folder + '/all_samples.json', 'w')
+    jsonfile = open(Path(json_folder, '/all_samples.json'), 'w')
     json.dump(j_dict, jsonfile)
     jsonfile.close()
 

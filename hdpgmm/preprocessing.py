@@ -3,6 +3,7 @@ import os
 import h5py
 from astropy.cosmology import LambdaCDM, z_at_value
 import astropy.units as u
+from pathlib import Path
 
 def load_single_event(event, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315, ol = 0.685):
     '''
@@ -61,7 +62,7 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
     else:
         rdstate = np.random.RandomState()
         
-    event_files = [path+'/'+f for f in os.listdir(path) if not f.startswith('.')]
+    event_files = [Path(path,f) for f in os.listdir(path) if not f.startswith('.')]
     events = []
     names  = []
     for event in event_files:
@@ -95,7 +96,7 @@ def unpack_gw_posterior(event, par, cosmology, rdstate, n_samples = -1):
     h, om, ol = cosmology
     ap_cosmology = LambdaCDM(H0 = h*100, Om0 = om, Ode0 = ol)
     
-    with h5py.File(data_folder + file, 'r') as f:
+    with h5py.File(Path(data_folder, file), 'r') as f:
         print(file)
         try:
             data = f['PublicationSamples']['posterior_samples']
