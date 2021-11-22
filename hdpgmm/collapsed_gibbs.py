@@ -536,18 +536,18 @@ class SE_Sampler:
             try:
                 assign = np.genfromtxt(Path(self.output_assignment, 'assignment_{0}.txt'.format(self.e_ID)))
             except:
-                assign = np.array([int(a//(len(samples)/int(self.icn))) for a in range(len(samples))])
+                assign = np.array([int(a//(len(self.mass_samples)/int(self.icn))) for a in range(len(self.mass_samples))])
         elif self.initial_assign is not None:
             assign = self.initial_assign
         else:
-            assign = np.array([int(a//(len(samples)/int(self.icn))) for a in range(len(samples))])
+            assign = np.array([int(a//(len(self.mass_samples)/int(self.icn))) for a in range(len(self.mass_samples))])
         cluster_ids = list(np.arange(int(np.max(assign)+1)))
         state = {
             'cluster_ids_': cluster_ids,
             'data_': self.mass_samples,
             'num_clusters_': int(self.icn),
             'alpha_': self.alpha0,
-            'Ntot': len(samples),
+            'Ntot': len(self.mass_samples),
             'hyperparameters_': {
                 "b": self.b,
                 "a": self.a,
@@ -656,8 +656,8 @@ class SE_Sampler:
         scores = {}
         cluster_ids = list(self.state['suffstats'].keys()) + ['new']
         for cid in cluster_ids:
-            scores[cid] = self.log_predictive_likelihood(data_id, cid, self.state)
-            scores[cid] += self.log_cluster_assign_score(cid, self.state)
+            scores[cid] = self.log_predictive_likelihood(data_id, cid)
+            scores[cid] += self.log_cluster_assign_score(cid)
         scores = {cid: np.exp(score) for cid, score in scores.items()}
         normalization = 1/sum(scores.values())
         scores = {cid: score*normalization for cid, score in scores.items()}
@@ -760,7 +760,7 @@ class SE_Sampler:
             :dict state: current state to update
         """
         # alpha sampling
-        state['alpha_'] = self.update_alpha()
+        self.state['alpha_'] = self.update_alpha()
         self.alpha_samples.append(self.state['alpha_'])
         pairs = zip(self.state['data_'], self.state['assignment'])
         for data_id, (datapoint, cid) in enumerate(pairs):
@@ -793,7 +793,7 @@ class SE_Sampler:
             components[i] = {'mean': m, 'sigma': np.sqrt(s), 'weight': weights[i]}
         self.mixture_samples.append(components)
     
-    def save_assignment_state(self)
+    def save_assignment_state(self):
         z = self.state['assignment']
         np.savetxt(Path(self.output_assignment, 'assignment_{0}.txt'.format(self.e_ID)), np.array(z).T)
         return
@@ -952,17 +952,17 @@ class SE_Sampler:
                     # In that case, a (FileExistsError: [Errno 17] File exists: 'filename') is raised.
                     # This simply ignores the error and moves on with the inference.
                     pass
-            setattr(self, attr, d)
+            setattr(self, attr, newfolder)
         
         if self.diagnostic:
             for d, attr in zip(diagnostic_dirs, diagnostic_attr):
                 newfolder = Path(self.output_events, d)
-                if not newfolder.exists()
+                if not newfolder.exists():
                     try:
                         newfolder.mkdir()
                     except:
                         pass
-                setattr(self, attr, d)
+                setattr(self, attr, newfolder)
         return
     
     def run_diagnostic(self):
@@ -1474,7 +1474,7 @@ class MF_Sampler():
             components[i] = {'mean': m, 'sigma': s, 'weight': weights[i]}
         self.mixture_samples.append(components)
     
-    def save_assignment_state(self)
+    def save_assignment_state(self):
         z = self.state['assignment']
         np.savetxt(Path(self.output_folder, 'assignment_mf.txt'.format(self.e_ID)), np.array(z).T)
         return
