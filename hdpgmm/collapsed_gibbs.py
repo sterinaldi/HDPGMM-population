@@ -534,14 +534,14 @@ class SE_Sampler:
         '''
         if self.restart:
             try:
-                assign = np.genfromtxt(Path(self.output_assignment, 'assignment_{0}.txt'.format(self.e_ID)))
+                assign = np.genfromtxt(Path(self.output_assignment, 'assignment_{0}.txt'.format(self.e_ID))).astype(int)
             except:
                 assign = np.array([int(a//(len(self.mass_samples)/int(self.icn))) for a in range(len(self.mass_samples))])
         elif self.initial_assign is not None:
             assign = self.initial_assign
         else:
             assign = np.array([int(a//(len(self.mass_samples)/int(self.icn))) for a in range(len(self.mass_samples))])
-        cluster_ids = list(np.arange(int(np.max(assign)+1)))
+        cluster_ids = list(set(assign))
         state = {
             'cluster_ids_': cluster_ids,
             'data_': self.mass_samples,
@@ -1273,12 +1273,12 @@ class MF_Sampler():
         self.update_draws()
         if self.restart:
             try:
-                assign = np.genfromtxt(Path(self.output_folder, 'assignment_mf.txt'))
+                assign = np.genfromtxt(Path(self.output_assignment, 'assignment_mf.txt')).astype(int)
             except:
                 assign = np.array([int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))])
         else:
             assign = np.array([int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))])
-        cluster_ids = list(np.arange(int(np.max(assign)+1)))
+        cluster_ids = list(set(assign))
         state = {
             'cluster_ids_': cluster_ids,
             'data_': self.posterior_draws,
