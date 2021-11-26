@@ -158,7 +158,10 @@ def main():
     
     save_options(options)
     
-    ray.init(num_cpus = 1)
+    try:
+        ray.init(num_cpus = 1)
+    except:
+        ray.init(num_cpus = 1, object_store_memory=10**9)
     
     sampler = HDPGMM.SE_Sampler.remote(
                                 burnin = int(options.burnin),

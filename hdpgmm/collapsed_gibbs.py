@@ -300,9 +300,17 @@ class CGSampler:
         Runs all the single-event analysis.
         '''
         if self.verbose:
-            ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads)
+            try:
+                ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads)
+            except:
+                # Handles memory error
+                # ValueError: The configured object store size (XXX.XXX GB) exceeds /dev/shm size (YYY.YYY GB). This will harm performance. Consider deleting files in /dev/shm or increasing its size with --shm-size in Docker. To ignore this warning, set RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1.
+                ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads, object_store_memory=10**9)
         else:
-            ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads, log_to_driver = False)
+            try:
+                ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads, log_to_driver = False)
+            except:
+                ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads, log_to_driver = False, object_store_memory=10**9)
         i = 0
         self.posterior_functions_events = []
         pool = self.initialise_samplers()
@@ -1226,7 +1234,13 @@ class MF_Sampler():
         self.unit = unit
         self.restart = restart
         
-        ray.init(ignore_reinit_error=True, num_cpus = n_parallel_threads)
+        try:
+            ray.init(ignore_reinit_error=True, num_cpus = n_parallel_threads)
+        except:
+            # Handles memory error
+            # ValueError: The configured object store size (XXX.XXX GB) exceeds /dev/shm size (YYY.YYY GB). This will harm performance. Consider deleting files in /dev/shm or increasing its size with --shm-size in Docker. To ignore this warning, set RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1.
+            ray.init(ignore_reinit_error=True, num_cpus = n_parallel_threads, object_store_memory=10**9)
+            
         self.p = ActorPool([ScoreComputer.remote(self.t_min, self.t_max, self.sigma_min, self.sigma_max) for _ in range(n_parallel_threads)])
         
     def transform(self, samples):
