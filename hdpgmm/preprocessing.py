@@ -27,7 +27,7 @@ def load_single_event(event, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om
         rdstate = np.random.RandomState(seed = 1)
     else:
         rdstate = np.random.RandomState()
-    name, ext = event.split('/')[-1].split('.')
+    name, ext = str(event).split('/')[-1].split('.')
     if ext == 'txt':
         if n_samples > -1:
             samples = np.genfromtxt(event)
@@ -66,7 +66,7 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
     events = []
     names  = []
     for event in event_files:
-        name, ext = event.split('/')[-1].split('.')
+        name, ext = str(event).split('/')[-1].split('.')
         names.append(name)
         if ext == 'txt':
             if n_samples > -1:
