@@ -44,6 +44,7 @@ setup(
     python_requires = '>=3.6',
     packages = ['hdpgmm'],
     include_dirs = [numpy.get_include()],
+    install_requires=requirements,
     setup_requires=['numpy', 'cython', 'setuptools_scm'],
     entry_points={},
     package_data={"": ['*.c', '*.pyx', '*.pxd']},
