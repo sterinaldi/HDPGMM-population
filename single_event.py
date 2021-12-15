@@ -35,7 +35,7 @@ def save_options(options):
     Arguments:
         :dict options: options
     """
-    logfile = open(options.output + '/options_log.txt', 'w')
+    logfile = open(Path(options.output, 'options_log.txt'), 'w')
     for key, val in zip(vars(options).keys(), vars(options).values()):
         logfile.write('{0}: {1}\n'.format(key,val))
     logfile.close()
