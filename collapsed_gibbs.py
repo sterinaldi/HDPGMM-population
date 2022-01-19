@@ -49,13 +49,26 @@ class Integrator(cpnest.model.Model):
         self.bounds    = bounds + [[-1,1] for _ in range(int(self.dim*(self.dim-1)/2.))]
     
     def log_prior(self, x):
-        
         logP = super(Integrator, self).log_prior(x)
+        if not np.isfinite(logP):
+            return -np.inf
+            
+        self.mean = np.array(x.values[:self.dim])
+        
+        corr = np.identity(self.dim)/2.
+        corr[np.triu_indices(self.dim, 1)] = x.values[2*self.dim:]
+        corr = corr + corr.T
+        sigma = x.values[self.dim:2*self.dim]
+        ss    = np.outer(sigma,sigma)
+        self.cov_mat = ss@corr
+        
+        if not np.linalg.slogdet(self.cov_mat)[0] > 0:
+            return -np.inf
+        
         return logP
     
     def log_likelihood(self, x):
-#        vals = np.array([x[name] for name in self.names])
-        return integrand(x.values, self.events, self.logN_cnst, self.dim)
+        return integrand(self.mean, self.covariance, self.events, self.logN_cnst, self.dim)
 
 """
 Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
