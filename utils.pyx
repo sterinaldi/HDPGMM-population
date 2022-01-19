@@ -57,27 +57,16 @@ cdef double _log_prob_mixture(np.ndarray mu, np.ndarray sigma, dict ev):
 @cython.wraparound(False)
 @cython.nonecheck(False)
 @cython.cdivision(True)
-cdef double _integrand(double[::1] values, list events, double logN_cnst, unsigned int dim):
+cdef double _integrand(double[:] mean, double[:,:] covariance, list events, double logN_cnst, unsigned int dim):
     cdef unsigned int i,j
     cdef double logprob = 0.0
     cdef dict ev
-    cdef double[::1] mu = values[:dim]
-    cdef double[::1] sigma = values[dim:2*dim+1]
-    cdef double[::1] rho = values[2*dim+1:]
-    cdef np.ndarray[double,ndim=2,mode='c'] norm_cov = np.identity(dim)*0.5*sigma*sigma
-    cdef double[:,:] norm_cov_view = norm_cov
-    cdef np.ndarray[double,ndim=2,mode='c'] cov
-    for i in range(dim):
-        for j in range(dim):
-            if i < j:
-                norm_cov_view[i,j] = rho[dim*i + (j-i)]*sigma[i]*sigma[j]
-    cov = norm_cov + norm_cov.T
     for ev in events:
-        logprob += _log_prob_mixture(mu, cov, ev)
+        logprob += _log_prob_mixture(mean, covariance, ev)
     return logprob - logN_cnst
 
-def integrand(double[::1] values, list events, double logN_cnst, unsigned int dim):
-    return _integrand(values, events, logN_cnst, dim)
+def integrand(double[:] mean, double[:,:] covariance, list events, double logN_cnst, unsigned int dim):
+    return _integrand(mean, covariance, events, logN_cnst, dim)
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
