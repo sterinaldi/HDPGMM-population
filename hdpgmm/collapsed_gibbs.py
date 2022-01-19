@@ -954,7 +954,7 @@ class SE_Sampler:
             if not newfolder.exists():
                 try:
                     newfolder.mkdir()
-                except:
+                except FileExistsError:
                     # This is to avoid that, while running several parallel single-event analysis,
                     # more than one instance of SE_Sampler attempts to create the folder.
                     # In that case, a (FileExistsError: [Errno 17] File exists: 'filename') is raised.
