@@ -70,11 +70,17 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
         names.append(name)
         if ext == 'txt':
             if n_samples > -1:
-                samples = np.genfromtxt(event)
-                s = int(min([n_samples, len(samples)]))
-                events.append(np.sort(rdstate.choice(samples, size = s, replace = False)))
+                try:
+                    samples = np.genfromtxt(event)
+                    s = int(min([n_samples, len(samples)]))
+                    events.append(np.sort(rdstate.choice(samples, size = s, replace = False)))
+                except:
+                    pass
             else:
-                events.append(np.sort(np.genfromtxt(event)))
+                try:
+                    events.append(np.sort(np.genfromtxt(event)))
+                except:
+                    pass
         else:
             events.append(np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol), rdstate = rdstate)))
     return (events, np.array(names))
