@@ -15,8 +15,11 @@ from hdpgmm.preprocessing import load_single_event
 import ray
 from ray.util import ActorPool
 from pathlib import Path
+from distutils.spawn import find_executable
 
-rcParams["text.usetex"] = True
+
+if find_executable('latex'):
+    rcParams["text.usetex"] = True
 rcParams["font.serif"] = "Computer Modern"
 rcParams["font.family"] = "Serif"
 rcParams["xtick.labelsize"]=14
@@ -86,8 +89,8 @@ def main():
     
     # Priors
     parser.add_option("--prior", type = "string", dest = "prior", help = "Parameters for NIG prior (a0, V0). See https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf sec. 6 for reference", default = '1,1')
-    parser.add_option("--mmin", type = "float", dest = "mmin", help = "Minimum BH mass [Msun]", default = 3.)
-    parser.add_option("--mmax", type = "float", dest = "mmax", help = "Maximum BH mass [Msun]", default = 120.)
+    parser.add_option("--mmin", type = "float", dest = "mmin", help = "Minimum BH mass [Msun]", default = np.inf)
+    parser.add_option("--mmax", type = "float", dest = "mmax", help = "Maximum BH mass [Msun]", default = -np.inf)
     parser.add_option("--alpha", type = "float", dest = "alpha0", help = "Internal (event) initial concentration parameter", default = 1.)
     parser.add_option("--sigma_max", type = "float", dest = "sigma_max", help = "Maximum std for clusters", default = None)
     
@@ -135,6 +138,9 @@ def main():
     
     # Loads event
     event, name = load_single_event(event = options.event_file, seed = options.seed, par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
+    
+    options.mmin = np.min([options.mmin, np.min(event)])
+    options.mmax = np.max([options.mmax, np.max(event)])
 
     # Loads posterior injections and saves them as interpolants
     if options.inj_file is not None:
