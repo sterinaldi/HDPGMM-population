@@ -4,7 +4,6 @@ configparser
 importlib
 matplotlib
 json
-re
 ray
 numba
 cython
