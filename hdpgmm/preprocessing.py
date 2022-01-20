@@ -62,21 +62,39 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
     else:
         rdstate = np.random.RandomState()
         
-    event_files = [Path(path,f) for f in os.listdir(path) if not f.startswith('.')]
+    event_files = [Path(path,f) for f in os.listdir(path) if not (f.startswith('.') or f.startswith('empty_files')]
     events = []
     names  = []
     for event in event_files:
         name, ext = str(event).split('/')[-1].split('.')
         names.append(name)
+        
+        empty_file_counter = 0
+        empty_files = []
+        
         if ext == 'txt':
             if n_samples > -1:
-                samples = np.genfromtxt(event)
-                s = int(min([n_samples, len(samples)]))
-                events.append(np.sort(rdstate.choice(samples, size = s, replace = False)))
+                if not os.stat(event).st_size == 0
+                    samples = np.genfromtxt(event)
+                    s = int(min([n_samples, len(samples)]))
+                    events.append(np.sort(rdstate.choice(samples, size = s, replace = False)))
+                else:
+                    empty_file_counter += 1
+                    empty_files.append(file)
+                    
             else:
-                events.append(np.sort(np.genfromtxt(event)))
+                if not os.stat(event).st_size == 0:
+                    events.append(np.sort(np.genfromtxt(event)))
+                else:
+                    empty_files.append(event)
+                
         else:
             events.append(np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol), rdstate = rdstate)))
+        
+    if empty_file_counter > 0:
+        print('Warning: {0} empty files detected: these events will not be processed.\nSee empty_files.txt for details.'.format(empty_file_counter))
+        np.savetxt(Path(path, 'empty_files.txt'), np.array(empty_files).T)
+    
     return (events, np.array(names))
 
 def unpack_gw_posterior(event, par, cosmology, rdstate, n_samples = -1):
@@ -96,8 +114,7 @@ def unpack_gw_posterior(event, par, cosmology, rdstate, n_samples = -1):
     h, om, ol = cosmology
     ap_cosmology = LambdaCDM(H0 = h*100, Om0 = om, Ode0 = ol)
     
-    with h5py.File(Path(data_folder, file), 'r') as f:
-        print(file)
+    with h5py.File(Path(event), 'r') as f:
         try:
             data = f['PublicationSamples']['posterior_samples']
             if par == 'm1':
