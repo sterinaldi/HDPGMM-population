@@ -102,7 +102,7 @@ def plot_samples(samples, m_min, m_max, output, symbol, unit, injected_density =
     
     # saves median and CR
     names = ['m'] + [str(perc) for perc in percentiles]
-    np.savetxt(Path(output, '/log_joint_obs_prob_mf.txt'), np.array([app, p[50] - log_norm, p[5] - log_norm, p[16] - log_norm, p[84] - log_norm, p[95] - log_norm]).T, header = ' '.join(names))
+    np.savetxt(Path(output, 'log_joint_obs_prob_mf.txt'), np.array([app, p[50] - log_norm, p[5] - log_norm, p[16] - log_norm, p[84] - log_norm, p[95] - log_norm]).T, header = ' '.join(names))
     
     for perc in percentiles:
         p[perc] = np.exp(np.percentile(prob, perc, axis = 1))
@@ -124,7 +124,7 @@ def plot_samples(samples, m_min, m_max, output, symbol, unit, injected_density =
         for perc in percentiles:
             JSD[perc] = np.percentile(ent, perc, axis = 0)
         print('Jensen-Shannon distance: {0}+{1}-{2} nats'.format(*np.round((JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]), decimals = 3)))
-        np.savetxt(Path(output, '/joint_JSD.txt'), np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
+        np.savetxt(Path(output, 'joint_JSD.txt'), np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
     
     # as above, accounting for selection effects (observed distribution)
     if filtered_density is not None:
@@ -138,17 +138,17 @@ def plot_samples(samples, m_min, m_max, output, symbol, unit, injected_density =
         for perc in percentiles:
             JSD[perc] = np.percentile(ent, perc)
         print('Jensen-Shannon distance: {0}+{1}-{2} nats (filtered)'.format(*np.round((JSD[50], JSD[95]-JSD[50], JSD[50]-JSD[5]), decimals = 3)))
-        np.savetxt(Path(output, '/filtered_joint_relative_entropy.txt'), np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
+        np.savetxt(Path(output, 'filtered_joint_JSD.txt'), np.array([JSD[50], JSD[5], JSD[16], JSD[84], JSD[95]]), header = '50 5 16 84 95')
     
     # Maquillage
     ax.grid(True,dashes=(1,3))
     ax.legend(loc=0,frameon=False,fontsize=10)
     ax.set_xlabel('${0}\ [{1}]$'.format(symbol, unit))
     ax.set_ylabel('$p({0})$'.format(symbol))
-    plt.savefig(output + '/joint_mass_function.pdf', bbox_inches = 'tight')
+    plt.savefig(Path(output, 'joint_mass_function.pdf'), bbox_inches = 'tight')
     ax.set_yscale('log')
     ax.set_ylim(np.min(p[50]))
-    plt.savefig(Path(output,'/log_joint_mass_function.pdf'), bbox_inches = 'tight')
+    plt.savefig(Path(output, 'log_joint_mass_function.pdf'), bbox_inches = 'tight')
 
 def plot_astrophysical_distribution(samples, m_min, m_max, output, sel_func, symbol, unit, inj_density = None):
     """
@@ -227,7 +227,7 @@ def save_options(options):
     Arguments:
         :dict options: options
     """
-    logfile = open(path(options.output, '/options_log.txt'), 'w')
+    logfile = open(Path(options.output, 'options_log.txt'), 'w')
     for key, val in zip(vars(options).keys(), vars(options).values()):
         logfile.write('{0}: {1}\n'.format(key,val))
     logfile.close()
@@ -246,7 +246,7 @@ def main():
     parser.add_option("--selfunc", dest = "selection_function", help = "Python module with selection function or text file with M_i and S(M_i) for interp1d")
     parser.add_option("--true_masses", type = "string", dest = "true_masses", help = "Simulated true masses")
     parser.add_option("--par", type = "string", dest = "par", help = "Parameter from GW posterior", default = 'm1')
-    parser.add_option("--se_inj", type = "string", dest = "se_inj_folder", help = "Folder with injected single event posteriors (two columns file: m p)", default = None)
+    parser.add_option("--se_inj", type = "string", dest = "se_inj_folder", help = "Folder with injected single event posteriors (two columns file: m p), each file needs to be named after the corresponding event", default = None)
     parser.add_option("--symbol", type = "string", dest = "symbol", help = "LaTeX-style quantity symbol, for plotting purposes", default = 'M')
     parser.add_option("--unit", type = "string", dest = "unit", help = "LaTeX-style quantity unit, for plotting purposes. Use '' for dimensionless quantities", default = 'M_{\\odot}')
     
@@ -256,7 +256,7 @@ def main():
     parser.add_option("--icn", dest = "initial_cluster_number", type = "float", help = "Initial cluster number", default = 5.)
     parser.add_option("--nthreads", dest = "n_parallel_threads", type = "int", help = "Number of parallel threads to spawn", default = 8)
     parser.add_option("-e", "--processed_events", dest = "process_events", action = 'store_false', default = True, help = "Disables event processing")
-    parser.add_option("-v", "--verbose", dest = "verbose", action = 'store_true', default = False, help = "Display output")
+    parser.add_option("-v", "--verbose", dest = "verbose", action = 'store_true', default = False, help = "Display single event output")
     parser.add_option("-p", "--postprocessing", dest = "postprocessing", action = 'store_true', default = False, help = "Postprocessing - requires log_rec_prob_mf.txt")
     parser.add_option("-d", "--diagnostic", dest = "diagnostic", action = 'store_true', default = False, help = "Run diagnostic routines (Autocorrelation, quasi-convergence)")
     parser.add_option("-s", "--seed", dest = "seed", type = "int", default = 0, help = "Fix seed for reproducibility")
@@ -265,8 +265,8 @@ def main():
     
     # Priors
     parser.add_option("--prior_ev", type = "string", dest = "prior_ev", help = "Parameters for NIG prior (a0, V0). See https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf sec. 6 for reference", default = '1,1')
-    parser.add_option("--mmin", type = "float", dest = "mmin", help = "Minimum BH mass [Msun]", default = 3.)
-    parser.add_option("--mmax", type = "float", dest = "mmax", help = "Maximum BH mass [Msun]", default = 120.)
+    parser.add_option("--mmin", type = "float", dest = "mmin", help = "Minimum BH mass [Msun]. Default: min available sample", default = np.inf)
+    parser.add_option("--mmax", type = "float", dest = "mmax", help = "Maximum BH mass [Msun]. Default: max available sample", default = -np.inf)
     parser.add_option("--alpha", type = "float", dest = "alpha0", help = "Internal (event) initial concentration parameter", default = 1.)
     parser.add_option("--gamma", type = "float", dest = "gamma0", help = "External (MF) initial concentration parameter", default = 1.)
     
@@ -274,12 +274,6 @@ def main():
     parser.add_option("--cosmology", type = "string", dest = "cosmology", help = "Cosmological parameters (h, om, ol). Default values from Planck (2021)", default = '0.674,0.315,0.685')
 
     (options, args) = parser.parse_args()
-    
-    # Converts relative paths to absolute paths
-    options.events_path   = Path(options.events_path).absolute()
-    options.output        = Path(options.output).absolute()
-    if options.se_inj_folder is not None:
-        options.se_inj_folder = Path(options.se_inj_folder).absolute()
     
     # If provided, reads optfile. Command-line inputs override file options.
     if options.optfile is not None:
@@ -295,6 +289,15 @@ def main():
             options.inj_density_file = None
         if options.selection_function == 'None':
             options.selection_function = None
+        if options.se_inj_folder == 'None':
+            options.se_inj_folder = None
+        
+    # Converts relative paths to absolute paths
+    options.events_path   = Path(options.events_path).resolve()
+    options.output        = Path(options.output).resolve()
+    if options.se_inj_folder is not None:
+        options.se_inj_folder = Path(options.se_inj_folder).resolve()
+    
     
     # Reads hyperpriors and sampling settings
     if options.prior_ev is not None:
@@ -314,6 +317,9 @@ def main():
     
     # Loads events
     events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
+    
+    options.mmin = np.min([options.mmin, np.min([np.min(ev) for ev in events])])
+    options.mmax = np.max([options.mmax, np.max([np.max(ev) for ev in events])])
     
     # Loads posterior injections and saves them as interpolants
     inj_post = {}
@@ -399,7 +405,7 @@ def main():
     
     # Saves all samples in a single file
     j_dict = {str(mi): list(draws) for mi, draws in zip(m, samples_set.T)}
-    jsonfile = open(Path(json_folder, '/all_samples.json'), 'w')
+    jsonfile = open(Path(json_folder, 'all_samples.json'), 'w')
     json.dump(j_dict, jsonfile)
     jsonfile.close()
 
