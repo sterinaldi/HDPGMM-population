@@ -260,7 +260,7 @@ def main():
     parser.add_option("-p", "--postprocessing", dest = "postprocessing", action = 'store_true', default = False, help = "Postprocessing - requires log_rec_prob_mf.txt")
     parser.add_option("-d", "--diagnostic", dest = "diagnostic", action = 'store_true', default = False, help = "Run diagnostic routines (Autocorrelation, quasi-convergence)")
     parser.add_option("-s", "--seed", dest = "seed", type = "int", default = 0, help = "Fix seed for reproducibility")
-    parser.add_option("--n_samps_dsp", dest = "n_samples_dsp", default = -1, help = "Number of samples to analyse (downsampling). Default: all")
+    parser.add_option("--n_samples_dsp", dest = "n_samples_dsp", default = -1, help = "Number of samples to analyse (downsampling). Default: all")
     parser.add_option("-r", "--restart", dest = "restart", default = False, action = 'store_true', help = "Restart from checkpoint or last state. Requires the analysis to be run at least once before, otherwise the inital assignment will fall back to the default assignment")
     
     # Priors
