@@ -63,9 +63,12 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
         rdstate = np.random.RandomState()
         
     event_files = [Path(path,f) for f in os.listdir(path) if not (f.startswith('.') or f.startswith('empty_files'))]
-    events = []
-    names  = []
-    for event in event_files:
+    events      = []
+    names       = []
+    n_events    = len(event_files)
+    
+    for i, event in enumerate(event_files):
+        print('\r{0}/{1} event(s)'.format(i+1, n_events), end = '')
         name, ext = str(event).split('/')[-1].split('.')
         names.append(name)
         
@@ -80,22 +83,23 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
                     events.append(np.sort(rdstate.choice(samples, size = s, replace = False)))
                 else:
                     empty_file_counter += 1
-                    empty_files.append(file)
+                    empty_files.append(str(event))
                     
             else:
                 if not os.stat(event).st_size == 0:
                     samples = np.atleast_1d(np.genfromtxt(event))
                     events.append(np.sort(samples))
                 else:
-                    empty_files.append(event)
+                    empty_file_counter += 1
+                    empty_files.append(str(event))
                 
         else:
             events.append(np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol), rdstate = rdstate)))
         
     if empty_file_counter > 0:
         print('Warning: {0} empty files detected: these events will not be processed.\nSee empty_files.txt for details.'.format(empty_file_counter))
-        np.savetxt(Path(path, 'empty_files.txt'), np.array(empty_files).T)
-    
+        np.savetxt(Path(path, 'empty_files.txt'), empty_files, fmt="%s")
+
     return (events, np.array(names))
 
 def unpack_gw_posterior(event, par, cosmology, rdstate, n_samples = -1):
