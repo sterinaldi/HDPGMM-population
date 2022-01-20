@@ -84,7 +84,8 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
                     
             else:
                 if not os.stat(event).st_size == 0:
-                    events.append(np.sort(np.genfromtxt(event)))
+                    samples = np.genfromtxt(event)
+                    events.append(np.sort(samples))
                 else:
                     empty_files.append(event)
                 
