@@ -75,7 +75,7 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
         if ext == 'txt':
             if n_samples > -1:
                 if not os.stat(event).st_size == 0:
-                    samples = np.genfromtxt(event)
+                    samples = np.atleast_1d(np.genfromtxt(event))
                     s = int(min([n_samples, len(samples)]))
                     events.append(np.sort(rdstate.choice(samples, size = s, replace = False)))
                 else:
@@ -84,8 +84,7 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
                     
             else:
                 if not os.stat(event).st_size == 0:
-                    samples = np.genfromtxt(event)
-                    print(event)
+                    samples = np.atleast_1d(np.genfromtxt(event))
                     events.append(np.sort(samples))
                 else:
                     empty_files.append(event)
