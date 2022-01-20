@@ -178,7 +178,7 @@ def main():
                                 V = float(options.V),
                                 output_folder = options.output,
                                 verbose = True,
-                                diagnostic = bool(options.diagnostic),
+                                diagnostic = int(options.diagnostic),
                                 initial_cluster_number = int(options.initial_cluster_number),
                                 transformed = False,
                                 var_symbol = options.symbol,
