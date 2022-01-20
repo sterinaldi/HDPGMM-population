@@ -318,8 +318,8 @@ def main():
     # Loads events
     events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
     
-    options.mmin = np.min([options.mmin, np.min([np.min(ev) for ev in events])])
-    options.mmax = np.max([options.mmax, np.max([np.max(ev) for ev in events])])
+    options.mmin = np.min([float(options.mmin), np.min([np.min(ev) for ev in events])])
+    options.mmax = np.max([float(options.mmax), np.max([np.max(ev) for ev in events])])
     
     # Loads posterior injections and saves them as interpolants
     inj_post = {}
@@ -361,7 +361,7 @@ def main():
     save_options(options)
     
     # Runs the analysis
-    if not bool(options.postprocessing):
+    if not int(options.postprocessing):
         sampler = HDPGMM.CGSampler(events = events,
                               samp_settings = options.samp_settings,
                               samp_settings_ev = options.samp_settings_ev,
