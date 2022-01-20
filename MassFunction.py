@@ -316,7 +316,7 @@ def main():
     options.restart = int(options.restart)
     
     # Loads events
-    events, names = load_data(path = options.events_path, seed = bool(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
+    events, names = load_data(path = options.events_path, seed = int(options.seed), par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
     
     options.mmin = np.min([float(options.mmin), np.min([np.min(ev) for ev in events])])
     options.mmax = np.max([float(options.mmax), np.max([np.max(ev) for ev in events])])
@@ -370,17 +370,17 @@ def main():
                               prior_ev = options.prior_ev,
                               m_min = float(options.mmin),
                               m_max = float(options.mmax),
-                              verbose = bool(options.verbose),
-                              diagnostic = bool(options.diagnostic),
+                              verbose = int(options.verbose),
+                              diagnostic = int(options.diagnostic),
                               output_folder = options.output,
                               initial_cluster_number = int(options.initial_cluster_number),
-                              process_events = bool(options.process_events),
+                              process_events = int(options.process_events),
                               n_parallel_threads = int(options.n_parallel_threads),
                               injected_density = filtered_density,
                               true_masses = options.true_masses,
                               names = names,
                               inj_post = inj_post,
-                              seed = bool(options.seed),
+                              seed = int(options.seed),
                               var_symbol = options.symbol,
                               unit = options.unit,
                               restart = options.restart,
