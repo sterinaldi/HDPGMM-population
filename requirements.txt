@@ -1,9 +1,7 @@
 numpy
-optparse
 configparser
 importlib
 matplotlib
-json
 ray
 numba
 cython
