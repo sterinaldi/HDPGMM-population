@@ -62,7 +62,7 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
     else:
         rdstate = np.random.RandomState()
         
-    event_files = [Path(path,f) for f in os.listdir(path) if not (f.startswith('.') or f.startswith('empty_files')]
+    event_files = [Path(path,f) for f in os.listdir(path) if not (f.startswith('.') or f.startswith('empty_files'))]
     events = []
     names  = []
     for event in event_files:
@@ -74,7 +74,7 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
         
         if ext == 'txt':
             if n_samples > -1:
-                if not os.stat(event).st_size == 0
+                if not os.stat(event).st_size == 0:
                     samples = np.genfromtxt(event)
                     s = int(min([n_samples, len(samples)]))
                     events.append(np.sort(rdstate.choice(samples, size = s, replace = False)))
