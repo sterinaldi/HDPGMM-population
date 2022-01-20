@@ -139,8 +139,8 @@ def main():
     # Loads event
     event, name = load_single_event(event = options.event_file, seed = options.seed, par = options.par, n_samples = int(options.n_samples_dsp), h = options.h, om = options.om, ol = options.ol)
     
-    options.mmin = np.min([options.mmin, np.min(event)])
-    options.mmax = np.max([options.mmax, np.max(event)])
+    options.mmin = np.min([float(options.mmin), np.min(event)])
+    options.mmax = np.max([float(options.mmax), np.max(event)])
 
     # Loads posterior injections and saves them as interpolants
     if options.inj_file is not None:
