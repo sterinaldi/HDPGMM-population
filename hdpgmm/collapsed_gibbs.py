@@ -327,8 +327,12 @@ class CGSampler:
         '''
         print('Loading mixtures...')
         self.posterior_functions_events = []
-        prob_files = [Path(self.output_recprob, f) for f in os.listdir(self.output_recprob) if f.startswith('posterior_functions')]
+        
+        #Path -> str -> Path for sorting purposes.
+        prob_files = [str(Path(self.output_recprob, f)) for f in os.listdir(self.output_recprob) if f.startswith('posterior_functions')]
         prob_files.sort(key = natural_keys)
+        prob_files = [Path(p) for p in prob_files]
+        
         for prob in prob_files:
             sampfile = open(prob, 'r')
             samps = json.load(sampfile)
@@ -339,8 +343,8 @@ class CGSampler:
         print('------------------------')
         print('Loaded {0} events'.format(len(self.events)))
         print('Initial guesses:\nalpha0 = {0}\tgamma0 = {1}\tN = {2}'.format(self.alpha0, self.gamma0, self.icn))
-        print('Hyperparameters: a = {0}, V = {1}'.format(self.a, self.V))
-        print('{0} between {1} {3} and {2} {3}'.format(self.var_symbol, self.glob_m_min, self.glob_m_max, self.unit))
+        print('Single event hyperparameters: a = {0}, V = {1}'.format(self.a_ev, self.V_ev))
+        print('{0} between {1} {3} and {2} {3}'.format(self.var_symbol, *np.round((self.m_min, self.m_max), decimals = 0), self.unit))
         print('Burn-in: {0} samples'.format(self.burnin_mf))
         print('Samples: {0} - 1 every {1}'.format(self.n_draws_mf, self.n_steps_mf))
         print('Verbosity: {0} Diagnostic: {1} Reproducible run: {2}'.format(self.verbose, self.diagnostic, bool(self.seed)))
@@ -1490,7 +1494,7 @@ class MF_Sampler():
     
     def save_assignment_state(self):
         z = self.state['assignment']
-        np.savetxt(Path(self.output_folder, 'assignment_mf.txt'.format(self.e_ID)), np.array(z).T)
+        np.savetxt(Path(self.output_folder, 'assignment_mf.txt'), np.array(z).T)
         return
     
     def postprocess(self):
@@ -1523,13 +1527,13 @@ class MF_Sampler():
         self.m_vals  = np.ascontiguousarray(app)
 
         # Saves interpolant functions into json file
-        name = Path(self.output_folder, 'posterior_functions_mf_')
+        name = 'posterior_functions_mf_'
         extension ='.json'
         x = 0
-        fileName = Path(name, str(x), extension)
-        while os.path.exists(fileName):
+        fileName = Path(self.output_folder, name + str(x) + extension)
+        while fileName.exists():
             x = x + 1
-            fileName = Path(name, str(x), extension)
+            fileName = Path(self.output_folder, name + str(x) + extension)
         
         j_dict = {str(m): list(draws) for m, draws in zip(app, prob)}
         with open(fileName, 'w') as jsonfile:
@@ -1571,19 +1575,19 @@ class MF_Sampler():
         ax.set_xlim(self.m_min_plot, self.m_max_plot)
         ax.grid(True,dashes=(1,3))
         ax.legend(loc=0,frameon=False,fontsize=10)
-        plt.savefig(self.output_folder + '/obs_mass_function.pdf', bbox_inches = 'tight')
+        plt.savefig(Path(self.output_folder, 'obs_mass_function.pdf'), bbox_inches = 'tight')
         ax.set_yscale('log')
         ax.set_ylim(np.min(p[50]))
         plt.savefig(Path(self.output_folder, 'log_obs_mass_function.pdf'), bbox_inches = 'tight')
         
         # saves mixture samples into json file
-        name = Path(self.output_folder, '/posterior_mixtures_mf_')
+        name = 'posterior_mixtures_mf_'
         extension ='.json'
         x = 0
-        fileName = Path(name, str(x), extension)
+        fileName = Path(self.output_folder, name + str(x) + extension)
         while fileName.exists():
             x = x + 1
-            fileName = Path(name, str(x), extension)
+            fileName = Path(self.output_folder, name + str(x) + extension)
             
         j_dict = {str(i): sample for i, sample in enumerate(self.mixture_samples)}
         with open(fileName, 'w') as jsonfile:
@@ -1790,7 +1794,7 @@ class ScoreComputer:
         else:
             if len(state['ev_in_cl'][cluster_id]) == 0:
                 return -np.inf
-            return np.log(len(self.state['ev_in_cl'][cluster_id]))
+            return np.log(len(state['ev_in_cl'][cluster_id]))
 
     def log_predictive_likelihood(self, data_id, cluster_id, state, posterior_draws):
         '''
