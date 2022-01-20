@@ -98,7 +98,7 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
             events.append(np.sort(unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol), rdstate = rdstate)))
         
     if empty_file_counter > 0:
-        print('Warning: {0} empty files detected: these events will not be processed.\nSee empty_files.txt for details.'.format(empty_file_counter))
+        print('\nWarning: {0} empty files detected: these events will not be processed.\nSee empty_files.txt for details.'.format(empty_file_counter))
         np.savetxt(Path(path, 'empty_files.txt'), empty_files, fmt="%s")
 
     return (events, np.array(names))
