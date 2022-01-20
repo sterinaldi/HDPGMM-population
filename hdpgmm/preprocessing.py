@@ -67,13 +67,14 @@ def load_data(path, seed = 0, par = 'm1', n_samples = -1, h = 0.674, om = 0.315,
     names       = []
     n_events    = len(event_files)
     
+    empty_file_counter = 0
+    empty_files        = []
+    
     for i, event in enumerate(event_files):
         print('\r{0}/{1} event(s)'.format(i+1, n_events), end = '')
         name, ext = str(event).split('/')[-1].split('.')
         names.append(name)
-        
-        empty_file_counter = 0
-        empty_files = []
+
         
         if ext == 'txt':
             if n_samples > -1:
