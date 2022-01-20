@@ -492,7 +492,7 @@ class SE_Sampler:
         self.a  = a
         self.V  = V
         # Miscellanea
-        self.icn    = initial_cluster_number
+        self.default_icn = initial_cluster_number
         self.SuffStat = namedtuple('SuffStat', 'mean var N')
         self.hierarchical_flag = hierarchical_flag
         self.restart = restart
@@ -1121,6 +1121,7 @@ class SE_Sampler:
         
         self.alpha_samples = []
         self.mixture_samples = []
+        self.icn = np.min([len(mass_samples), self.default_icn])
         self.n_clusters = [self.icn]
         
         # Run the analysis
