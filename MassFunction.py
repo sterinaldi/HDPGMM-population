@@ -241,7 +241,7 @@ def main():
     # Input/Output
     parser.add_option("-i", "--input", type = "string", dest = "events_path", help = "Input folder")
     parser.add_option("-o", "--output", type = "string", dest = "output", help = "Output folder")
-    parser.add_option("--optfile", type = "string", dest = "optfile", help = "Options file. Passing command line options overrides optfile. It must contains ALL options")
+    parser.add_option("--optfile", type = "string", dest = "optfile", help = "Options file. Passing command line options overrides optfile.")
     parser.add_option("--inj_density", type = "string", dest = "inj_density_file", help = "Python module with injected density")
     parser.add_option("--selfunc", dest = "selection_function", help = "Python module with selection function or text file with M_i and S(M_i) for interp1d")
     parser.add_option("--true_masses", type = "string", dest = "true_masses", help = "Simulated true masses")
@@ -280,8 +280,9 @@ def main():
         config = configparser.ConfigParser()
         config.read(options.optfile)
         opts = config['DEFAULT']
+        configfile_keys = [k for k in opts.keys()]
         for key, val in zip(vars(options).keys(), vars(options).values()):
-            if not is_opt_provided(parser, key):
+            if not is_opt_provided(parser, key) and key in configfile_keys:
                 vars(options)[key] = opts[key]
         if options.true_masses == 'None':
             options.true_masses = None

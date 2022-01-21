@@ -112,8 +112,9 @@ def main():
         config = configparser.ConfigParser()
         config.read(options.optfile)
         opts = config['DEFAULT']
+        configfile_keys = [k for k in opts.keys()]
         for key, val in zip(vars(options).keys(), vars(options).values()):
-            if not is_opt_provided(parser, key):
+            if not is_opt_provided(parser, key) and key in configfile_keys:
                 vars(options)[key] = opts[key]
     
     if options.inj_file == 'None':
