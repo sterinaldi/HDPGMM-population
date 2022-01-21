@@ -670,7 +670,7 @@ class SE_Sampler:
         for cid in cluster_ids:
             scores[cid] = self.log_predictive_likelihood(data_id, cid)
             scores[cid] += self.log_cluster_assign_score(cid)
-        scores = {cid: np.exp(score) for cid, score in scores.items()}
+        scores = {cid: (np.exp(score) if np.isfinite(score) else 0.) for cid, score in scores.items()}
         normalization = 1/sum(scores.values())
         scores = {cid: score*normalization for cid, score in scores.items()}
         return scores
