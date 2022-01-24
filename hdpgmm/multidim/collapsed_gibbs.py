@@ -4,38 +4,56 @@ import os
 import re
 import pickle
 
-from mpl_toolkits.mplot3d import Axes3D
+from pathlib import Path
+
 from corner import corner
+import cpnest.model
+import itertools
 
 from collections import namedtuple, Counter
-
 from numpy import random
-from numpy.linalg import det, inv
 
 from scipy import stats
 from scipy.stats import entropy, gamma
-from scipy.stats import multivariate_t as student_t
-from scipy.stats import multivariate_normal as mn
-from scipy.spatial.distance import jensenshannon as js
 from scipy.special import logsumexp, betaln, gammaln, erfinv
 from scipy.interpolate import RegularGridInterpolator
-from scipy.integrate import nquad
-from scipy.linalg import det
 
-from sampler_component_pars import sample_point, MH_single_event
-import itertools
+from hdpgmm.multidim.utils import integrand, compute_norm_const, log_norm, scalar_log_norm, make_sym_matrix, cartesian_to_celestial
+from hdpgmm.multidim.sampler_component_pars import sample_point, MH_single_event
 
 from time import perf_counter
 
 import ray
 from ray.util import ActorPool
-from ray.util.multiprocessing import Pool
 
-from numba import jit
+from numba import jit, njit
+from numba.extending import get_cython_function_address
+import ctypes
 
-from utils import integrand, compute_norm_const, log_norm, scalar_log_norm, make_sym_matrix, cartesian_to_celestial
+from distutils.spawn import find_executable
 
-import cpnest.model
+_PTR = ctypes.POINTER
+_dble = ctypes.c_double
+_ptr_dble = _PTR(_dble)
+
+addr = get_cython_function_address("scipy.special.cython_special", "gammaln")
+functype = ctypes.CFUNCTYPE(_dble, _dble)
+gammaln_float64 = functype(addr)
+
+@njit
+def numba_gammaln(x):
+  return gammaln_float64(x)
+  
+if find_executable('latex'):
+    rcParams["text.usetex"] = True
+rcParams["xtick.labelsize"]=14
+rcParams["ytick.labelsize"]=14
+rcParams["xtick.direction"]="in"
+rcParams["ytick.direction"]="in"
+rcParams["legend.fontsize"]=15
+rcParams["axes.labelsize"]=16
+rcParams["axes.grid"] = True
+rcParams["grid.alpha"] = 0.6
 
 class Integrator(cpnest.model.Model):
     
@@ -57,9 +75,9 @@ class Integrator(cpnest.model.Model):
         
         corr = np.identity(self.dim)/2.
         corr[np.triu_indices(self.dim, 1)] = x.values[2*self.dim:]
-        corr = corr + corr.T
-        sigma = x.values[self.dim:2*self.dim]
-        ss    = np.outer(sigma,sigma)
+        corr         = corr + corr.T
+        sigma        = x.values[self.dim:2*self.dim]
+        ss           = np.outer(sigma,sigma)
         self.cov_mat = ss@corr
         
         if not np.linalg.slogdet(self.cov_mat)[0] > 0:
@@ -101,6 +119,27 @@ def natural_keys(text):
     '''
     return [ atoi(c) for c in re.split(r'(\d+)', text) ]
 
+def my_student_t(df, t, mu, sigma, dim, s2max = np.inf):
+    """
+    http://gregorygundersen.com/blog/2020/01/20/multivariate-t/
+    """
+    vals, vecs = np.linalg.eigh(sigma)
+    vals       = np.minimum(vals, s2max)
+    logdet     = np.log(vals).sum()
+    valsinv    = np.array([1./v for v in vals])
+    U          = vecs * np.sqrt(valsinv)
+    dev        = t - mu
+    maha       = np.square(np.dot(dev, U)).sum(axis=-1)
+
+    x = 0.5 * (df + dim)
+    A = numba_gammaln(x)
+    B = numba_gammaln(0.5 * df)
+    C = dim/2. * np.log(df * np.pi)
+    D = 0.5 * logdet
+    E = -x * np.log1p((1./df) * maha)
+
+    return float(A - B - C - D + E)
+
 class CGSampler:
     '''
     Class to analyse a set of mass posterior samples and reconstruct the mass distribution.
@@ -133,63 +172,72 @@ class CGSampler:
         sampler.run()
     '''
     def __init__(self, events,
-                       m_min,
-                       m_max,
                        samp_settings, # burnin, draws, step (list)
                        samp_settings_ev = None,
+                       m_min = np.inf,
+                       m_max = -np.inf,
                        alpha0 = 1,
                        gamma0 = 1,
-                       hyperpriors_ev = [1,1], #a, V
+                       prior_ev = [1,1/4.], #a, V
                        verbose = True,
                        output_folder = './',
                        initial_cluster_number = 5.,
                        process_events = True,
                        n_parallel_threads = 8,
-                       injected_density = None,
                        true_masses = None,
                        names = None,
+                       seed = 0,
                        var_names = None,
-                       n_samp_to_plot = 2000
+                       n_samp_to_plot = None
                        ):
         
+        # Settings
         self.burnin_mf, self.n_draws_mf, self.step_mf = samp_settings
+        
         if samp_settings_ev is not None:
             self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings_ev
         else:
             self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings
-        self.events = events
-        sample_min = np.min([np.min(a, axis = 0) for a in self.events], axis = 0)
-        sample_max = np.max([np.max(a, axis = 0) for a in self.events], axis = 0)
-        self.m_min   = np.minimum(m_min, sample_min)
-        self.m_max   = np.maximum(m_max, sample_max)
-        self.m_max_plot = m_max
-        # probit
+        
+        self.verbose            = verbose
+        self.process_events     = process_events
+        self.n_parallel_threads = n_parallel_threads
+        self.events             = events
+        
+        if not seed == 0:
+            self.rdstate = np.random.RandomState(seed = 1)
+        else:
+            self.rdstate = np.random.RandomState()
+            
+        self.seed = seed
+        
+        # Priors
+        self.a_ev, self.V_ev = prior_ev
+        sample_min = np.array([np.min(ai) for ai in np.concatenate(self.events)])
+        sample_max = np.array([np.max(ai) for ai in np.concatenate(self.events)])
+        self.m_min = np.minimum(m_min, sample_min)
+        self.m_max = np.maximum(m_max, sample_max)
+        self.dim   = len(self.events[-1][-1])
+
+        # Probit
         self.upper_bounds = np.array([x if not x == 0 else -1e-4 for x in np.array([x*(1+1e-4) if x > 0 else x*(1-1e-4) for x in self.m_max])])
         self.lower_bounds = np.array([x if not x == 0 else 1e-4 for x in np.array([x*(1-1e-4) if x > 0 else x*(1+1e-4) for x in self.m_min])])
         self.transformed_events = [self.transform(ev) for ev in events]
         self.t_min = self.transform([self.m_min])
         self.t_max = self.transform([self.m_max])
-        # DP
+        
+        # Dirichlet Process
         self.alpha0 = alpha0
         self.gamma0 = gamma0
-        # student-t
-        if hyperpriors_ev is not None:
-            self.a_ev, self.V_ev = hyperpriors_ev
-        else:
-            self.a_ev, self.V_ev = [1,1]
-        # miscellanea
-        self.output_folder = output_folder
-        self.icn = initial_cluster_number
-        self.event_samplers = []
-        self.verbose = verbose
-        self.process_events = process_events
-        self.n_parallel_threads = n_parallel_threads
-        self.injected_density = injected_density
-        self.true_masses = true_masses
-        self.output_recprob = self.output_folder + '/reconstructed_events/pickle/'
-        self.dim = len(self.events[-1][-1])
+        self.icn    = initial_cluster_number
+
+        # Output
+        self.output_folder  = Path(output_folder)
+        self.true_masses    = true_masses
+        self.output_recprob = Path(self.output_folder, 'reconstructed_events','mixtures')
+        self.var_names      = var_names
         self.n_samp_to_plot = n_samp_to_plot
-        self.var_names = var_names
+        
         if names is not None:
             self.names = names
         else:
@@ -216,51 +264,56 @@ class CGSampler:
         Initialises n_parallel_threads instances of SE_Sampler class
         '''
         event_samplers = []
-        for i, (ev, t_ev) in enumerate(zip(self.events[marker:marker+self.n_parallel_threads], self.transformed_events[marker:marker+self.n_parallel_threads])):
-            event_samplers.append(SE_Sampler.remote(
-                                            mass_samples           = t_ev,
-                                            event_id               = self.names[marker+i],
-                                            burnin                 = self.burnin_ev,
-                                            n_draws                = self.n_draws_ev,
-                                            step                   = self.step_ev,
-                                            m_min                  = np.min(ev, axis = 0),
-                                            m_max                  = np.max(ev, axis = 0),
-                                            t_min                  = np.min(t_ev, axis = 0),
-                                            t_max                  = np.max(t_ev, axis = 0),
-                                            real_masses            = ev,
-                                            alpha0                 = self.alpha0,
-                                            a                      = self.a_ev,
-                                            V                      = self.V_ev,
-                                            glob_m_max             = self.m_max,
-                                            glob_m_min             = self.m_min,
-                                            upper_bounds           = self.upper_bounds,
-                                            lower_bounds           = self.lower_bounds,
-                                            output_folder          = self.output_folder,
-                                            verbose                = self.verbose,
+        for i in range(self.n_parallel_threads):
+            if not self.seed == 0:
+                rdstate = np.random.RandomState(seed = i)
+            else:
+                rdstate = np.random.RandomState()
+            event_samplers.append(SE_Sampler.remote( #FIXME: check args (from 1d)
+                                            burnin        = self.burnin_ev,
+                                            n_draws       = self.n_draws_ev,
+                                            n_steps       = self.n_steps_ev,
+                                            alpha0        = self.alpha0,
+                                            a             = self.a_ev,
+                                            V             = self.V_ev,
+                                            glob_m_max    = self.m_max,
+                                            glob_m_min    = self.m_min,
+                                            output_folder = self.output_folder,
+                                            verbose       = self.verbose,
+                                            diagnostic    = self.diagnostic,
+                                            transformed   = True,
+                                            var_symbol    = self.var_symbol,
+                                            unit          = self.unit,
+                                            rdstate       = rdstate,
+                                            restart       = self.restart,
                                             initial_cluster_number = self.icn,
-                                            transformed            = True,
-                                            var_names              = self.var_names
+                                            hierarchical_flag = True,
                                             ))
-        return event_samplers
+        return ActorPool(event_samplers)
         
     def run_event_sampling(self):
         '''
-        Performs analysis on each event
+        Runs all the single-event analysis.
         '''
         if self.verbose:
-            ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads)
+            try:
+                ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads)
+            except:
+                # Handles memory error
+                # ValueError: The configured object store size (XXX.XXX GB) exceeds /dev/shm size (YYY.YYY GB). This will harm performance. Consider deleting files in /dev/shm or increasing its size with --shm-size in Docker. To ignore this warning, set RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1.
+                ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads, object_store_memory=10**9)
         else:
-            ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads, log_to_driver = False)
+            try:
+                ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads, log_to_driver = False)
+            except:
+                ray.init(ignore_reinit_error=True, num_cpus = self.n_parallel_threads, log_to_driver = False, object_store_memory=10**9)
         i = 0
         self.posterior_functions_events = []
-        for n in range(int(len(self.events)/self.n_parallel_threads)+1):
-            tasks = self.initialise_samplers(n*self.n_parallel_threads)
-            pool = ActorPool(tasks)
-            #guardare ray.wait
-            for s in pool.map(lambda a, v: a.run.remote(), range(len(tasks))):
-                self.posterior_functions_events.append(s)
-                i += 1
-                print('\rProcessed {0}/{1} events\r'.format(i, len(self.events)), end = '')
+        pool = self.initialise_samplers()
+        for s in pool.map(lambda a, v: a.run.remote(v), [[t_ev, id, None, ev, None, None] for ev, id, t_ev in zip(self.events, self.names, self.transformed_events)]): #FIXME: check args (from 1d)
+            self.posterior_functions_events.append(s)
+            i += 1
+            print('\rProcessed {0}/{1} events\r'.format(i, len(self.events)), end = '')
         ray.shutdown()
         return
     
@@ -270,8 +323,12 @@ class CGSampler:
         '''
         print('Loading mixtures...')
         self.posterior_functions_events = []
-        prob_files = [self.output_recprob+f for f in os.listdir(self.output_recprob) if f.startswith('posterior_functions')]
+        
+        #Path -> str -> Path for sorting purposes.
+        prob_files = [str(Path(self.output_recprob, f)) for f in os.listdir(self.output_recprob) if f.startswith('posterior_functions')]
         prob_files.sort(key = natural_keys)
+        prob_files = [Path(p) for p in prob_files]
+        
         for prob in prob_files:
             sampfile = open(prob, 'rb')
             samps = pickle.load(sampfile)
@@ -281,9 +338,13 @@ class CGSampler:
         print('Collapsed Gibbs sampler')
         print('------------------------')
         print('Loaded {0} events'.format(len(self.events)))
-        print('Concentration parameters:\nalpha0 = {0}\tgamma0 = {1}'.format(self.alpha0, self.gamma0))
+        print('Initial guesses:\nalpha0 = {0}\tgamma0 = {1}\tN = {2}'.format(self.alpha0, self.gamma0, self.icn))
+        print('Single event hyperparameters: a = {0}, V = {1}'.format(self.a_ev, self.V_ev))
+        for v, u, d in zip(self.var_names, self.m_max, self.m_min):
+            print('{0} between {1} and {2}'.format(v, *np.round((d, u), decimals = 0)))
         print('Burn-in: {0} samples'.format(self.burnin_mf))
-        print('Samples: {0} - 1 every {1}'.format(self.n_draws_mf, self.step_mf))
+        print('Samples: {0} - 1 every {1}'.format(self.n_draws_mf, self.n_steps_mf))
+        print('Verbosity: {0} Diagnostic: {1} Reproducible run: {2}'.format(bool(self.verbose), bool(self.diagnostic), bool(self.seed)))
         print('------------------------')
         return
     
@@ -292,10 +353,10 @@ class CGSampler:
         Creates an instance of MF_Sampler class
         '''
         self.load_mixtures()
-        self.mf_folder = self.output_folder+'/mass_function/'
-        if not os.path.exists(self.mf_folder):
-            os.mkdir(self.mf_folder)
-        flattened_transf_ev = np.array([x for ev in self.transformed_events for x in ev])
+        self.mf_folder = Path(self.output_folder, 'mass_function')
+        if not self.mf_folder.exists():
+            self.mf_folder.mkdir()
+        flattened_transf_ev = np.array([x for ev in self.transformed_events for x in ev]) #FIXME: check args
         sampler = MF_Sampler(self.posterior_functions_events,
                        self.dim,
                        self.burnin_mf,
@@ -337,30 +398,8 @@ class CGSampler:
         print('Elapsed time: {0}h {1}m {2}s'.format(h, m, s))
         return
         
-
-@jit(forceobj=True)
-def my_student_t(df, t, mu, sigma, dim, s2max = np.inf):
-    """
-    http://gregorygundersen.com/blog/2020/01/20/multivariate-t/
-    """
-    vals, vecs = np.linalg.eigh(sigma)
-    vals       = np.minimum(vals, s2max)
-    logdet     = np.log(vals).sum()
-    valsinv    = np.array([1./v for v in vals])
-    U          = vecs * np.sqrt(valsinv)
-    dev        = t - mu
-    maha       = np.square(np.dot(dev, U)).sum(axis=-1)
-
-    x = 0.5 * (df + dim)
-    A = gammaln(x)
-    B = gammaln(0.5 * df)
-    C = dim/2. * np.log(df * np.pi)
-    D = 0.5 * logdet
-    E = -x * np.log1p((1./df) * maha)
-
-    return float(A - B - C - D + E)
     
-#@ray.remote
+@ray.remote
 class SE_Sampler:
     '''
     Class to reconstruct a posterior density function given samples.
@@ -635,8 +674,8 @@ class SE_Sampler:
         for _ in range(thinning):
             a_new = a_old + random.RandomState().uniform(-1,1)*0.5
             if a_new > 0:
-                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old)
-                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new)
+                logP_old = numba_gammaln(a_old) - numba_gammaln(a_old + n) + K * np.log(a_old)
+                logP_new = numba_gammaln(a_new) - numba_gammaln(a_new + n) + K * np.log(a_new)
                 if logP_new - logP_old > np.log(random.uniform()):
                     a_old = a_new
         return a_old
@@ -677,7 +716,7 @@ class SE_Sampler:
             s = stats.invwishart(df = nu_n, scale = L_n).rvs()
             t_df    = nu_n - self.dim + 1
             t_shape = L_n*(k_n+1)/(k_n*t_df)
-            m = student_t(df = t_df, loc = mu_n.flatten(), shape = t_shape).rvs()
+            m = my_student_t(df = t_df, loc = mu_n.flatten(), shape = t_shape).rvs()
             components[i] = {'mean': m, 'cov': s, 'weight': weights[i], 'N': N}
         self.mixture_samples.append(components)
     
@@ -961,7 +1000,7 @@ class MF_Sampler():
             'assignment': assign,
             'pi': {cid: self.alpha0 / self.icn for cid in cluster_ids},
             'ev_in_cl': {cid: list(np.where(np.array(assign) == cid)[0]) for cid in cluster_ids},
-            'logL_D': {cid: None for cid in cluster_ids}
+            'logL_D': {cid: None for cid in cluster_ids},
             'starting_points': {}
             }
         for cid in state['cluster_ids_']:
@@ -1097,8 +1136,8 @@ class MF_Sampler():
         for _ in range(trimming):
             a_new = a_old + random.RandomState().uniform(-1,1)*0.5#.gamma(1)
             if a_new > 0:
-                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old)
-                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new)
+                logP_old = numba_gammaln(a_old) - numba_gammaln(a_old + n) + K * np.log(a_old)
+                logP_new = numba_gammaln(a_new) - numba_gammaln(a_new + n) + K * np.log(a_new)
                 if logP_new - logP_old > np.log(random.uniform()):
                     a_old = a_new
         return a_old
