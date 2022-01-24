@@ -14,7 +14,7 @@ from collections import namedtuple, Counter
 from numpy import random
 
 from scipy import stats
-from scipy.stats import entropy, gamma
+from scipy.stats import entropy, gamma, multivariate_t
 from scipy.special import logsumexp, betaln, gammaln, erfinv
 from scipy.interpolate import RegularGridInterpolator
 
@@ -188,7 +188,10 @@ class CGSampler:
                        names = None,
                        seed = 0,
                        var_names = None,
-                       n_samp_to_plot = None
+                       n_samp_to_plot = None,
+                       deltax = 1e-4, # Arbitrary choice!
+                       restart = False,
+                       n_gridpoints = 20,
                        ):
         
         # Settings
@@ -199,6 +202,7 @@ class CGSampler:
         else:
             self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings
         
+        self.restart            = restarts
         self.verbose            = verbose
         self.process_events     = process_events
         self.n_parallel_threads = n_parallel_threads
@@ -213,15 +217,26 @@ class CGSampler:
         
         # Priors
         self.a_ev, self.V_ev = prior_ev
-        sample_min = np.array([np.min(ai) for ai in np.concatenate(self.events)])
-        sample_max = np.array([np.max(ai) for ai in np.concatenate(self.events)])
-        self.m_min = np.minimum(m_min, sample_min)
-        self.m_max = np.maximum(m_max, sample_max)
-        self.dim   = len(self.events[-1][-1])
-
+        self.sample_min      = np.array([np.min(ai) for ai in np.concatenate(self.events)])
+        self.sample_max      = np.array([np.max(ai) for ai in np.concatenate(self.events)])
+        self.m_min           = np.minimum(m_min, sample_min)
+        self.m_max           = np.maximum(m_max, sample_max)
+        self.dim             = len(self.events[-1][-1])
+        
+        # Sanity check for zeros in bounds
+        for i in range(self.dim):
+            if self.m_min[i] == 0:
+                if self.sample_min > deltax:
+                    self.m_min[i] = deltax
+                else:
+                    self.m_min[i] = self.sample_min/2.
+            elif self.m_max[i] == 0:
+                if self.sample_min < -deltax:
+                    self.m_max[i] = -deltax
+                else:
+                    self.m_max[i] = self.sample_min/2.
+                    
         # Probit
-        self.upper_bounds = np.array([x if not x == 0 else -1e-4 for x in np.array([x*(1+1e-4) if x > 0 else x*(1-1e-4) for x in self.m_max])])
-        self.lower_bounds = np.array([x if not x == 0 else 1e-4 for x in np.array([x*(1-1e-4) if x > 0 else x*(1+1e-4) for x in self.m_min])])
         self.transformed_events = [self.transform(ev) for ev in events]
         self.t_min = self.transform([self.m_min])
         self.t_max = self.transform([self.m_max])
@@ -237,6 +252,7 @@ class CGSampler:
         self.output_recprob = Path(self.output_folder, 'reconstructed_events','mixtures')
         self.var_names      = var_names
         self.n_samp_to_plot = n_samp_to_plot
+        self.n_gridpoints   = n_gridpoints
         
         if names is not None:
             self.names = names
@@ -253,10 +269,22 @@ class CGSampler:
             :float or np.ndarray: transformed sample(s)
         '''
         
-        cdf = (np.array(samples).T - np.atleast_2d([self.lower_bounds]).T)/np.array([self.upper_bounds - self.lower_bounds]).T
+        if self.m_min > 0:
+            min = self.m_min*0.9999
+        else:
+            min = self.m_min*1.0001
+        if self.m_max > 0:
+            max = self.m_max*1.0001
+        else:
+            max = self.m_max*0.9999
+        cdf_bounds = [min, max]
+        
+        cdf = (np.array(samples).T - np.atleast_2d([cdf_bounds[0]]).T)/np.array([cdf_bounds[1] - cdf_bounds[0]]).T
         new_samples = np.sqrt(2)*erfinv(2*cdf-1).T
+        
         if len(new_samples) == 1:
             return new_samples[0]
+        
         return new_samples
     
     def initialise_samplers(self, marker):
@@ -433,121 +461,136 @@ class SE_Sampler:
         sampler = SE_Sampler(*args)
         sampler.run()
     '''
-    def __init__(self, mass_samples,
-                       event_id,
-                       burnin,
+    def __init__(self, burnin,
                        n_draws,
-                       step,
-                       m_min,
-                       m_max,
-                       t_min = -1,
-                       t_max = 1,
-                       real_masses = None,
+                       n_steps,
                        alpha0 = 1,
                        a = 1,
-                       V = 1,
+                       V = 1/4.,
                        glob_m_max = None,
                        glob_m_min = None,
-                       upper_bounds = None,
-                       lower_bounds = None,
                        output_folder = './',
                        verbose = True,
                        initial_cluster_number = 5.,
                        transformed = False,
                        var_names = None,
-                       vol_rec = False
+                       inital_assign = None,
+                       sigma_max = None,
+                       rdstate = None,
+                       hierarchical_flag = None,
+                       restart = False,
+                       n_gridpoints = 20,
                        ):
-        # New seed for each subprocess
-        random.RandomState(seed = os.getpid())
-        if real_masses is None:
-            self.initial_samples = mass_samples
+        
+        if rdstate == None:
+            self.rdstate = np.random.RandomState()
         else:
-            self.initial_samples = real_masses
-        self.e_ID    = event_id
+            self.rdstate = rdstate
+
         self.burnin  = burnin
         self.n_draws = n_draws
-        self.step    = step
-        self.m_min   = m_min
-        self.m_max   = m_max
-        if glob_m_min is None:
-            self.glob_m_min = m_min
-        else:
-            self.glob_m_min = glob_m_min
-            
-        if glob_m_max is None:
-            self.glob_m_max = m_max
-        else:
-            self.glob_m_max = glob_m_max
+        self.n_steps = n_steps
         
-        if upper_bounds is None:
-            self.upper_bounds = np.array([x if not x == 0 else -1e-9 for x in np.array([x*(1+1e-9) if x > 0 else x*(1-1e-9) for x in self.glob_m_max])])
-        else:
-            self.upper_bounds = upper_bounds
-        if lower_bounds is None:
-            self.lower_bounds = np.array([x if not x == 0 else 1e-9 for x in np.array([x*(1-1e-9) if x > 0 else x*(1+1e-9) for x in self.glob_m_min])])
-        else:
-            self.lower_bounds = lower_bounds
+        if hierarchical_flag and (glob_m_min is None or glob_m_max is None):
+            raise Warning('Running a hierarchical inference with no global min/max specified.')
         
-        if transformed:
-            self.mass_samples = mass_samples
-            self.t_max   = t_max
-            self.t_min   = t_min
+        self.glob_m_min = glob_m_min
+        self.glob_m_max = glob_m_max
+        
+        
+        if sigma_max is None:
+            self.sigma_max_from_data = True
         else:
-            self.mass_samples = self.transform(mass_samples)
-            self.t_max        = self.transform([self.m_max])
-            self.t_min        = self.transform([self.m_min])
-            
-        self.sigma_max = np.var(self.mass_samples, axis = 0)
+            self.sigma_max_from_data = False
+            self.sigma_max = sigma_max
+        
         self.dim = len(mass_samples[-1])
+
         # DP parameters
         self.alpha0 = alpha0
         # Student-t parameters
-        self.L  = (np.std(self.mass_samples, axis = 0)/9.)**2*np.identity(self.dim)
         self.nu  = np.max([a,self.dim])
         self.k  = V
-        self.mu = np.atleast_2d(np.mean(self.mass_samples, axis = 0))
         # Miscellanea
-        self.icn    = initial_cluster_number
-        self.states = []
+        self.default_icn = initial_cluster_number
         self.SuffStat = namedtuple('SuffStat', 'mean cov N')
+        self.hierarchical_flag = hierarchical_flag
+        self.restart = restart
         # Output
         self.output_folder = output_folder
-        self.mixture_samples = []
-        self.n_clusters = []
         self.verbose = verbose
-        self.alpha_samples = []
+        self.transformed = transformed
         self.var_names = var_names
-        self.vol_rec = vol_rec
+        self.n_gridpoints = np.atleast_1d(n_gridpoints)
+        if len(self.n_gridpoints) == (1 or self.dim):
+            self.n_gridpoints = self.n_gridpoints*np.ones(self.dim)
+        else:
+            print('n_gridpoints is not scalar but its dimensions does not match the data point dimensions.')
+            exit()
+        
         
     def transform(self, samples):
         '''
         Coordinate change into probit space
+        cdf_normal is the cumulative distribution function of the unit normal distribution.
+        Adjusting glob_min/max has to be done internally because this class can be called independently from the hierarchical one.
+        
+        t(m) = cdf_normal((m-m_min)/(m_max - m_min))
         
         Arguments:
             :float or np.ndarray samples: mass sample(s) to transform
         Returns:
             :float or np.ndarray: transformed sample(s)
         '''
-        cdf = (np.array(samples).T - np.atleast_2d(self.lower_bounds).T)/np.array([self.upper_bounds - self.lower_bounds]).T
+        
+        if self.glob_m_min > 0:
+            min = self.glob_m_min*0.9999
+        else:
+            min = self.glob_m_min*1.0001
+        if self.m_max > 0:
+            max = self.glob_m_max*1.0001
+        else:
+            max = self.glob_m_max*0.9999
+        
+        cdf_bounds = [min, max]
+        cdf = (np.array(samples).T - np.atleast_2d([cdf_bounds[0]]).T)/np.array([cdf_bounds[1] - cdf_bounds[0]]).T
         new_samples = np.sqrt(2)*erfinv(2*cdf-1).T
+        
         if len(new_samples) == 1:
             return new_samples[0]
+        
         return new_samples
     
         
     def initial_state(self, samples):
         '''
-        Create initial state
+        Creates initial state -  a dictionary that stores a number of useful variables.
+        Entries are:
+            :list 'cluster_ids_':    list of labels for the maximum number of active cluster across the run
+            :np.ndarray 'data_':     transformed samples
+            :int 'num_clusters_':    number of active clusters
+            :double 'alpha_':        actual value of concentration parameter
+            :int 'Ntot':             total number of samples
+            :dict 'hyperparameters': parameters of the hyperpriors
+            :dict 'suffstats':       mean, variance and number of samples of each active cluster
+            :list 'assignment':      list of cluster assignments (one for each sample)
         '''
-        assign = [a%int(self.icn) for a in range(len(samples))]
-        cluster_ids = list(np.arange(int(np.max(assign)+1)))
-        samp = np.copy(samples)
+        if self.restart:
+            try:
+                assign = np.genfromtxt(Path(self.output_assignment, 'assignment_{0}.txt'.format(self.e_ID))).astype(int)
+            except:
+                assign = np.array([int(a//(len(self.samples)/int(self.icn))) for a in range(len(self.samples))])
+        elif self.initial_assign is not None:
+            assign = self.initial_assign
+        else:
+            assign = np.array([int(a//(len(self.samples)/int(self.icn))) for a in range(len(self.samples))])
+        cluster_ids = list(set(assign))
         state = {
             'cluster_ids_': cluster_ids,
-            'data_': samp,
+            'data_': self.samples,
             'num_clusters_': int(self.icn),
             'alpha_': self.alpha0,
-            'Ntot': len(samples),
+            'Ntot': len(self.samples),
             'hyperparameters_': {
                 "L": self.L,
                 "k": self.k,
@@ -556,37 +599,47 @@ class SE_Sampler:
                 },
             'suffstats': {cid: None for cid in cluster_ids},
             'assignment': assign,
-            'pi': {cid: self.alpha0 / self.icn for cid in cluster_ids},
             }
-        self.update_suffstats(state)
-        return state
+        self.state = state
+        self.update_suffstats()
+        return
     
-    def update_suffstats(self, state):
-        for cluster_id, N in Counter(state['assignment']).items():
-            points_in_cluster = [x for x, cid in zip(state['data_'], state['assignment']) if cid == cluster_id]
+    def update_suffstats(self):
+        '''
+        Updates sufficient statistics for each cluster
+        '''
+        for cluster_id, N in Counter(self.state['assignment']).items():
+            points_in_cluster = [x for x, cid in zip(self.state['data_'], self.state['assignment']) if cid == cluster_id]
             mean = np.atleast_2d(np.array(points_in_cluster).mean(axis = 0))
             cov  = np.cov(np.array(points_in_cluster), rowvar = False)
             M    = len(points_in_cluster)
-            state['suffstats'][cluster_id] = self.SuffStat(mean, cov, M)
+            self.state['suffstats'][cluster_id] = self.SuffStat(mean, cov, M)
     
-    def log_predictive_likelihood(self, data_id, cluster_id, state):
+    def log_predictive_likelihood(self, data_id, cluster_id):
         '''
-        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster
+        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster - Eq. (2.30)
+        
+        Arguments:
+            :int data_id:    index of the considered sample
+            :int cluster_id: index of the considered cluster
+        
+        Returns:
+            :double: log Likelihood
         '''
         if cluster_id == "new":
             ss = self.SuffStat(np.atleast_2d(0),np.identity(self.dim)*0,0)
         else:
-            ss  = state['suffstats'][cluster_id]
+            ss  = self.state['suffstats'][cluster_id]
             
-        x = state['data_'][data_id]
+        x = self.state['data_'][data_id]
         mean = ss.mean
-        S = ss.cov
-        N = ss.N
+        S    = ss.cov
+        N    = ss.N
         # Update hyperparameters
-        k_n  = state['hyperparameters_']["k"] + N
-        mu_n = np.atleast_2d((state['hyperparameters_']["mu"]*state['hyperparameters_']["k"] + N*mean)/k_n)
-        nu_n = state['hyperparameters_']["nu"] + N
-        L_n  = state['hyperparameters_']["L"]*state['hyperparameters_']["k"] + S*N + state['hyperparameters_']["k"]*N*np.matmul((mean - state['hyperparameters_']["mu"]).T, (mean - state['hyperparameters_']["mu"]))/k_n
+        k_n  = self.state['hyperparameters_']["k"] + N
+        mu_n = np.atleast_2d((self.state['hyperparameters_']["mu"]*self.state['hyperparameters_']["k"] + N*mean)/k_n)
+        nu_n = self.state['hyperparameters_']["nu"] + N
+        L_n  = self.state['hyperparameters_']["L"]*self.state['hyperparameters_']["k"] + S*N + self.state['hyperparameters_']["k"]*N*np.matmul((mean - self.state['hyperparameters_']["mu"]).T, (mean - self.state['hyperparameters_']["mu"]))/k_n
         # Update t-parameters
         t_df    = nu_n - self.dim + 1
         t_shape = L_n*(k_n+1)/(k_n*t_df)
@@ -598,6 +651,8 @@ class SE_Sampler:
         x = np.atleast_2d(x)
         mean = (ss.mean*(ss.N)+x)/(ss.N+1)
         cov  = (ss.N*(ss.cov + np.matmul(ss.mean.T, ss.mean)) + np.matmul(x.T, x))/(ss.N+1) - np.matmul(mean.T, mean)
+        if (cov < 0).any(): # Numerical issue for clusters with one sample (variance = 0)
+            cov[cov < 0] = 0
         return self.SuffStat(mean, cov, ss.N+1)
 
 
@@ -607,76 +662,96 @@ class SE_Sampler:
             return(self.SuffStat(np.atleast_2d(0),np.identity(self.dim)*0,0))
         mean = (ss.mean*(ss.N)-x)/(ss.N-1)
         cov  = (ss.N*(ss.cov + np.matmul(ss.mean.T, ss.mean)) - np.matmul(x.T, x))/(ss.N-1) - np.matmul(mean.T, mean)
+        if (cov < 0).any(): # Numerical issue for clusters with one sample (variance = 0)
+            cov[cov < 0] = 0
         return self.SuffStat(mean, cov, ss.N-1)
         
-    def cluster_assignment_distribution(self, data_id, state):
+    def cluster_assignment_distribution(self, data_id):
         """
         Compute the marginal distribution of cluster assignment
-        for each cluster.
+        for each cluster. Eq. (2.39)
+        
+        Arguments:
+            :int data_id: sample index
+        
+        Returns:
+            :dict: p_i for each cluster
         """
         scores = {}
-        cluster_ids = list(state['suffstats'].keys()) + ['new']
+        cluster_ids = list(self.state['suffstats'].keys()) + ['new']
         for cid in cluster_ids:
-            scores[cid] = self.log_predictive_likelihood(data_id, cid, state)
-            scores[cid] += self.log_cluster_assign_score(cid, state)
+            scores[cid] = self.log_predictive_likelihood(data_id, cid)
+            scores[cid] += self.log_cluster_assign_score(cid)
         scores = {cid: np.exp(score) for cid, score in scores.items()}
         normalization = 1/sum(scores.values())
         scores = {cid: score*normalization for cid, score in scores.items()}
         return scores
 
-    def log_cluster_assign_score(self, cluster_id, state):
+    def log_cluster_assign_score(self, cluster_id):
         """
         Log-likelihood that a new point generated will
         be assigned to cluster_id given the current state.
         """
         if cluster_id == "new":
-            return np.log(state["alpha_"])
+            return np.log(self.state["alpha_"])
         else:
-            return np.log(state['suffstats'][cluster_id].N)
+            return np.log(self.state['suffstats'][cluster_id].N)
 
-    def create_cluster(self, state):
+    def create_cluster(self):
         state["num_clusters_"] += 1
-        cluster_id = max(state['suffstats'].keys()) + 1
-        state['suffstats'][cluster_id] = self.SuffStat(np.atleast_2d(0),np.identity(self.dim)*0,0)
-        state['cluster_ids_'].append(cluster_id)
+        cluster_id = max(self.state['suffstats'].keys()) + 1
+        self.state['suffstats'][cluster_id] = self.SuffStat(np.atleast_2d(0),np.identity(self.dim)*0,0)
+        self.state['cluster_ids_'].append(cluster_id)
         return cluster_id
 
-    def destroy_cluster(self, state, cluster_id):
-        state["num_clusters_"] -= 1
-        del state['suffstats'][cluster_id]
-        state['cluster_ids_'].remove(cluster_id)
+    def destroy_cluster(self, cluster_id):
+        self.state["num_clusters_"] -= 1
+        del self.state['suffstats'][cluster_id]
+        self.state['cluster_ids_'].remove(cluster_id)
         
-    def prune_clusters(self,state):
-        for cid in state['cluster_ids_']:
-            if state['suffstats'][cid].N == 0:
-                self.destroy_cluster(state, cid)
+    def prune_clusters(self):
+        for cid in self.state['cluster_ids_']:
+            if self.state['suffstats'][cid].N == 0:
+                self.destroy_cluster(cid)
 
-    def sample_assignment(self, data_id, state):
+    def sample_assignment(self, data_id):
         """
-        Sample new assignment from marginal distribution.
-        If cluster is "new", create a new cluster.
+        Samples new assignment from marginal distribution.
+        If cluster is "new", creates a new cluster.
+        
+        Arguments:
+            :int data_id: index of the sample to be assigned
+        
+        Returns:
+            :int: index of the selected cluster
         """
-        scores = self.cluster_assignment_distribution(data_id, state).items()
+        scores = self.cluster_assignment_distribution(data_id).items()
         labels, scores = zip(*scores)
-        cid = random.RandomState().choice(labels, p=scores)
+        cid = self.rdstate.choice(labels, p=scores)
         if cid == "new":
-            return self.create_cluster(state)
+            return self.create_cluster()
         else:
             return int(cid)
 
-    def update_alpha(self, state, thinning = 100):
+    def update_alpha(self, burnin = 200):
         '''
-        Update concentration parameter
+        Updates concentration parameter using a Metropolis-Hastings sampling scheme.
+        
+        Arguments:
+            :int burnin: MH burnin
+        
+        Returns:
+            :double: new concentration parametere value
         '''
-        a_old = state['alpha_']
-        n     = state['Ntot']
-        K     = len(state['cluster_ids_'])
-        for _ in range(thinning):
-            a_new = a_old + random.RandomState().uniform(-1,1)*0.5
+        a_old = self.state['alpha_']
+        n     = self.state['Ntot']
+        K     = len(self.state['cluster_ids_'])
+        for _ in range(burnin+self.rdstate.randint(100)):
+            a_new = a_old + self.rdstate.uniform(-1,1)*0.5
             if a_new > 0:
-                logP_old = numba_gammaln(a_old) - numba_gammaln(a_old + n) + K * np.log(a_old)
-                logP_new = numba_gammaln(a_new) - numba_gammaln(a_new + n) + K * np.log(a_new)
-                if logP_new - logP_old > np.log(random.uniform()):
+                logP_old = gammaln(a_old) - gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
+                logP_new = gammaln(a_new) - gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
+                if logP_new - logP_old > np.log(self.rdstate.uniform()):
                     a_old = a_new
         return a_old
 
@@ -685,67 +760,68 @@ class SE_Sampler:
         Collapsed Gibbs sampler for Dirichlet Process Gaussian Mixture Model
         """
         # alpha sampling
-        state['alpha_'] = self.update_alpha(state)
-        self.alpha_samples.append(state['alpha_'])
-        pairs = zip(state['data_'], state['assignment'])
+        self.state['alpha_'] = self.update_alpha()
+        self.alpha_samples.append(self.state['alpha_'])
+        pairs = zip(self.state['data_'], self.state['assignment'])
         for data_id, (datapoint, cid) in enumerate(pairs):
-            state['suffstats'][cid] = self.remove_datapoint_from_suffstats(datapoint, state['suffstats'][cid])
-            self.prune_clusters(state)
-            cid = self.sample_assignment(data_id, state)
-            state['assignment'][data_id] = cid
-            state['suffstats'][cid] = self.add_datapoint_to_suffstats(state['data_'][data_id], state['suffstats'][cid])
-        self.n_clusters.append(len(state['cluster_ids_']))
+            self.state['suffstats'][cid] = self.remove_datapoint_from_suffstats(datapoint, self.state['suffstats'][cid])
+            self.prune_clusters()
+            cid = self.sample_assignment(data_id)
+            self.state['assignment'][data_id] = cid
+            self.state['suffstats'][cid] = self.add_datapoint_to_suffstats(self.state['data_'][data_id], self.state['suffstats'][cid])
+        self.n_clusters.append(len(self.state['cluster_ids_']))
     
-    def sample_mixture_parameters(self, state):
+    def sample_mixture_parameters(self):
         '''
-        Draws a mixture sample
+        Draws a mixture sample (weights, means and variances) using conditional probabilities. Eqs. (3.2) and (3.3)
         '''
-        ss = state['suffstats']
-        alpha = [ss[cid].N + state['alpha_'] / state['num_clusters_'] for cid in state['cluster_ids_']]
-        weights = stats.dirichlet(alpha).rvs(size=1).flatten()
+        ss = self.state['suffstats']
+        alpha = [ss[cid].N + self.state['alpha_'] / self.state['num_clusters_'] for cid in self.state['cluster_ids_']]
+        weights = self.rdstate.dirichlet(alpha).flatten()
         components = {}
-        for i, cid in enumerate(state['cluster_ids_']):
+        for i, cid in enumerate(self.state['cluster_ids_']):
             mean = ss[cid].mean
-            S = ss[cid].cov
-            N     = ss[cid].N
-            k_n  = state['hyperparameters_']["k"] + N
-            mu_n = np.atleast_2d((state['hyperparameters_']["mu"]*state['hyperparameters_']["k"] + N*mean)/k_n)
-            nu_n = state['hyperparameters_']["nu"] + N
-            L_n  = state['hyperparameters_']["L"] + S*N + state['hyperparameters_']["k"]*N*np.matmul((mean - state['hyperparameters_']["mu"]).T, (mean - state['hyperparameters_']["mu"]))/k_n
+            S    = ss[cid].cov
+            N    = ss[cid].N
+            k_n  = self.state['hyperparameters_']["k"] + N
+            mu_n = np.atleast_2d((self.state['hyperparameters_']["mu"]*self.state['hyperparameters_']["k"] + N*mean)/k_n)
+            nu_n = self.state['hyperparameters_']["nu"] + N
+            L_n  = self.state['hyperparameters_']["L"] + S*N + self.state['hyperparameters_']["k"]*N*np.matmul((mean - self.state['hyperparameters_']["mu"]).T, (mean - self.state['hyperparameters_']["mu"]))/k_n
             # Update t-parameters
-            s = stats.invwishart(df = nu_n, scale = L_n).rvs()
+            s = stats.invwishart(df = nu_n, scale = L_n).rvs(random_state = self.rdstate)
             t_df    = nu_n - self.dim + 1
             t_shape = L_n*(k_n+1)/(k_n*t_df)
-            m = my_student_t(df = t_df, loc = mu_n.flatten(), shape = t_shape).rvs()
+            m = multivariate_t(df = t_df, loc = mu_n.flatten(), shape = t_shape).rvs(random_state = self.rdstate)
             components[i] = {'mean': m, 'cov': s, 'weight': weights[i], 'N': N}
         self.mixture_samples.append(components)
     
+    def save_assignment_state(self):
+        z = self.state['assignment']
+        np.savetxt(Path(self.output_assignment, 'assignment_{0}.txt'.format(self.e_ID)), np.array(z).T)
+        return
+    
     def run_sampling(self):
-        state = self.initial_state(self.mass_samples)
+        """
+        Runs the sampling algorithm - Listing 1
+        """
+        self.initial_state(self.samples)
         for i in range(self.burnin):
             if self.verbose:
                 print('\rBURN-IN: {0}/{1}'.format(i+1, self.burnin), end = '')
-            self.gibbs_step(state)
+            self.gibbs_step()
         if self.verbose:
             print('\n', end = '')
         for i in range(self.n_draws):
             if self.verbose:
                 print('\rSAMPLING: {0}/{1}'.format(i+1, self.n_draws), end = '')
-            for _ in range(self.step):
-                self.gibbs_step(state)
-            self.sample_mixture_parameters(state)
+            for _ in range(self.n_steps):
+                self.gibbs_step()
+            self.sample_mixture_parameters()
+            if i%100 == 0:
+                self.save_assignment_state()
+        self.save_assignment_state()
         if self.verbose:
             print('\n', end = '')
-        return
-    
-    def display_config(self):
-        print('MCMC Gibbs sampler')
-        print('------------------------')
-        print('Loaded {0} events'.format(len(self.events)))
-        print('Concentration parameters:\nalpha0 = {0}\tgamma0 = {1}'.format(self.alpha0, self.gamma0))
-        print('Burn-in: {0} samples'.format(self.burnin))
-        print('Samples: {0} - 1 every {1}'.format(self.n_draws, self.step))
-        print('------------------------')
         return
 
     def postprocess(self, n_points = 30):
@@ -755,16 +831,13 @@ class SE_Sampler:
         
         lower_bound = np.maximum(self.m_min, self.glob_m_min)
         upper_bound = np.minimum(self.m_max, self.glob_m_max)
-        points = [np.linspace(l, u, n_points) for l, u in zip(lower_bound, upper_bound)]
+        
+        points = [np.linspace(l, u, n) for l, u, n in zip(lower_bound, upper_bound, self.n_gridpoints)]
         log_vol_el = np.sum([np.log(v[1]-v[0]) for v in points])
         gridpoints = np.array(list(itertools.product(*points)))
-        percentiles = [50] #[5,16, 50, 84, 95]
+        percentiles = [50]
         
         p = {}
-        
-#        fig = plt.figure()
-#        ax  = fig.add_subplot(111)
-#        ax.hist(self.initial_samples, bins = int(np.sqrt(len(self.initial_samples))), histtype = 'step', density = True)
         prob = []
         for i, ai in enumerate(gridpoints):
             a = self.transform([ai])
@@ -778,7 +851,7 @@ class SE_Sampler:
         for i in range(self.n_draws):
             log_draws_interp.append(RegularGridInterpolator(points, prob[...,i] - logsumexp(prob[...,i] + log_vol_el)))
         
-        picklefile = open(self.output_posteriors + '/posterior_functions_{0}.pkl'.format(self.e_ID), 'wb')
+        picklefile = open(Path(self.output_posteriors, 'posterior_functions_{0}.pkl'.format(self.e_ID)), 'wb')
         pickle.dump(log_draws_interp, picklefile)
         picklefile.close()
         
@@ -787,11 +860,8 @@ class SE_Sampler:
         normalisation = logsumexp(p[50] + log_vol_el)
         for perc in percentiles:
             p[perc] = p[perc] - normalisation
-            
-        names = ['m'] + [str(perc) for perc in percentiles]
         
-#        np.savetxt(self.output_recprob + '/log_rec_prob_{0}.txt'.format(self.e_ID), np.array([app, p[5], p[16], p[50], p[84], p[95]]).T, header = ' '.join(names))
-        picklefile = open(self.output_recprob + '/log_rec_prob_{0}.pkl'.format(self.e_ID), 'wb')
+        picklefile = open(Path(self.output_recprob, 'log_rec_prob_{0}.pkl'.format(self.e_ID)), 'wb')
         pickle.dump(RegularGridInterpolator(points, p[50]), picklefile)
         picklefile.close()
         
@@ -801,16 +871,8 @@ class SE_Sampler:
             p[perc] = p[perc]/np.exp(normalisation)
             
         prob = np.array(prob)
-        
-        #FIXME: Jensen-Shannon distance in n dimensions? js works only on one axis
-#        ent = []
-#        for i in range(np.shape(prob)[1]):
-#            sample = np.exp(prob[:,i])
-#            ent.append(js(sample,p[50]))
-#        mean_ent = np.mean(ent)
-#        np.savetxt(self.output_entropy + '/KLdiv_{0}.txt'.format(self.e_ID), np.array(ent), header = 'mean JS distance = {0}'.format(mean_ent))
-        
-        picklefile = open(self.output_pickle + '/posterior_functions_{0}.pkl'.format(self.e_ID), 'wb')
+
+        picklefile = open(Path(self.output_mixtures, 'posterior_functions_{0}.pkl'.format(self.e_ID)), 'wb')
         pickle.dump(self.mixture_samples, picklefile)
         picklefile.close()
         
@@ -818,55 +880,123 @@ class SE_Sampler:
         self.median = np.array(p[50])
         self.points = points
         
-        samples_to_plot = np.array(MH_single_event(RegularGridInterpolator(points, p[50]), upper_bound, lower_bound, len(self.mass_samples)))
-        if self.vol_rec:
-            self.initial_samples = np.array([cartesian_to_celestial(np.array([x,y,z])) for x,y,z in zip(self.initial_samples[:,0], self.initial_samples[:,1], self.initial_samples[:,2])])
-            samples_to_plot = np.array([cartesian_to_celestial(np.array([x,y,z])) for x,y,z in zip(samples_to_plot[:,0], samples_to_plot[:,1], samples_to_plot[:,2])])
+        samples_to_plot = np.array(MH_single_event(RegularGridInterpolator(points, p[50]), upper_bound, lower_bound, len(self.samples)))
         c = corner(self.initial_samples, color = 'orange', labels = self.var_names, hist_kwargs={'density':True})
         c = corner(samples_to_plot, fig = c, color = 'blue', labels = self.var_names, hist_kwargs={'density':True})
-        c.savefig(self.output_pltevents + '/{0}.pdf'.format(self.e_ID), bbox_inches = 'tight')
+        c.savefig(Path(self.output_pltevents, '{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
+        
+        # Plot numbers of clusters
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(np.arange(1,len(self.n_clusters)+1), self.n_clusters, ls = '--', marker = ',', linewidth = 0.5)
-        fig.savefig(self.output_n_clusters+'n_clusters_{0}.pdf'.format(self.e_ID), bbox_inches='tight')
+        fig.savefig(Path(self.output_n_clusters, 'n_clusters_{0}.pdf'.format(self.e_ID)), bbox_inches='tight')
         
+        # Plot concentration parameter
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))))
-        fig.savefig(self.alpha_folder+'/alpha_{0}.pdf'.format(self.e_ID), bbox_inches='tight')
+        ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))), histtype = 'step', density = True)
+        fig.savefig(Path(self.alpha_folder, 'alpha_{0}.pdf'.format(self.e_ID)), bbox_inches='tight')
     
     def make_folders(self):
-        self.output_events = self.output_folder + '/reconstructed_events/'
-        if not os.path.exists(self.output_events):
-            os.mkdir(self.output_events)
-        if not os.path.exists(self.output_events + '/rec_prob/'):
-            os.mkdir(self.output_events + '/rec_prob/')
-        self.output_recprob = self.output_events + '/rec_prob/'
-        if not os.path.exists(self.output_events + '/n_clusters/'):
-            os.mkdir(self.output_events + '/n_clusters/')
-        self.output_n_clusters = self.output_events + '/n_clusters/'
-        if not os.path.exists(self.output_events + '/events/'):
-            os.mkdir(self.output_events + '/events/')
-        self.output_pltevents = self.output_events + '/events/'
-        if not os.path.exists(self.output_events + '/pickle/'):
-            os.mkdir(self.output_events + '/pickle/')
-        self.output_pickle = self.output_events + '/pickle/'
-        if not os.path.exists(self.output_events + '/posteriors/'):
-            os.mkdir(self.output_events + '/posteriors/')
-        self.output_posteriors = self.output_events + '/posteriors/'
-        if not os.path.exists(self.output_events + '/entropy/'):
-            os.mkdir(self.output_events + '/entropy/')
-        self.output_entropy = self.output_events + '/entropy/'
-        if not os.path.exists(self.output_events + '/alpha/'):
-            os.mkdir(self.output_events + '/alpha/')
-        self.alpha_folder = self.output_events + '/alpha/'
+        """
+        Creates directories.
+        """
+        self.output_events = Path(self.output_folder, 'reconstructed_events')
+        dirs       = ['rec_prob', 'n_clusters', 'events', 'mixtures', 'posteriors', 'entropy', 'alpha', 'assignment']
+        attr_names = ['output_recprob', 'output_n_clusters', 'output_pltevents', 'output_mixtures', 'output_posteriors', 'output_entropy', 'output_alpha', 'output_assignment']
+        
+        if not self.output_events.exists():
+            self.output_events.mkdir()
+        
+        for d, attr in zip(dirs, attr_names):
+            newfolder = Path(self.output_events, d)
+            if not newfolder.exists():
+                try:
+                    newfolder.mkdir()
+                except FileExistsError:
+                    # This is to avoid that, while running several parallel single-event analysis,
+                    # more than one instance of SE_Sampler attempts to create the folder.
+                    # In that case, a (FileExistsError: [Errno 17] File exists: 'filename') is raised.
+                    # This simply ignores the error and moves on with the inference.
+                    pass
+            setattr(self, attr, newfolder)
         return
         
 
-    def run(self):
+    def run(self, args):
         """
-        Runs sampler, saves samples and produces output plots.
+        Runs the sampler, saves samples and produces output plots.
+        
+        Arguments:
+            :iterable args: Iterable with arguments. These are (in order):
+                                - mass samples: the samples to analyse
+                                - event id: name to be given to the data set
+                                - (m_min, m_max): lower and upper bound for mass (optional - if not provided, uses min(mass_samples) and max(mass_samples))
+                                - real masses: samples in natural space, if mass samples are already transformed (optional - if it does not apply, use None)
+                                - inital assignment: initial guess for cluster assignments (optional - if it does not apply, use None)
         """
+        
+        # Unpack arguments
+        samples = args[0]
+        event_id = args[1]
+        real_samples = args[3]
+        
+        if args[2] is not None:
+            m_min, m_max = args[2]
+        else:
+            if real_samples is not None:
+                m_min = np.array([np.min(mi) for mi in np.array(real_samples).T])
+                m_max = np.array([np.max(mi) for mi in np.array(real_samples).T])
+            else:
+                m_min = np.array([np.min(mi) for mi in np.array(samples).T])
+                m_max = np.array([np.min(mi) for mi in np.array(samples).T])
+        initial_assign = args[4]
+        
+        # Store arguments
+        if real_masses is None:
+            self.initial_samples = samples
+        else:
+            self.initial_samples = real_samples
+            
+        self.initial_assign = initial_assign
+        self.e_ID           = event_id
+        
+        self.m_min      = np.minimum(m_min, np.min(self.initial_samples))
+        self.m_max      = np.maximum(m_max, np.max(self.initial_samples))
+        self.m_min_plot = m_min
+        self.m_max_plot = m_max
+
+        if self.glob_m_min is None:
+            self.glob_m_min = self.m_min
+        if self.glob_m_max is None:
+            self.glob_m_max = self.m_max
+        
+        # Check consistency
+        if real_masses is None and self.transformed:
+            raise ValueError('Samples are expected to be already transformed but no initial samples are provided.')
+            exit()
+
+        if self.transformed:
+            self.samples = samples
+            self.t_max   = np.max(samples)
+            self.t_min   = np.min(samples)
+        else:
+            self.samples = self.transform(samples)
+            self.t_max   = self.transform(self.m_max)
+            self.t_min   = self.transform(self.m_min)
+        
+        if self.sigma_max_from_data:
+            self.sigma_max = np.std(self.samples, axis = 0)/2.
+        
+        self.b  = self.a*(self.sigma_max/2.)**2
+        self.mu = np.mean(self.samples, axis = 0)
+
+        self.alpha_samples = []
+        self.mixture_samples = []
+        self.icn = np.min([len(samples), self.default_icn])
+        self.n_clusters = [self.icn]
+        
+        # Run the analysis
         self.make_folders()
         self.run_sampling()
         self.postprocess()
@@ -978,10 +1108,22 @@ class MF_Sampler():
         Returns:
             :float or np.ndarray: transformed sample(s)
         '''
-        cdf = (np.array(samples).T - np.atleast_2d([self.lower_bounds]).T)/np.array([self.upper_bounds - self.lower_bounds]).T
+        if self.m_min > 0:
+            min = self.m_min*0.9999
+        else:
+            min = self.m_min*1.0001
+        if self.m_max > 0:
+            max = self.m_max*1.0001
+        else:
+            max = self.m_max*0.9999
+        cdf_bounds = [min, max]
+        
+        cdf = (np.array(samples).T - np.atleast_2d([cdf_bounds[0]]).T)/np.array([cdf_bounds[1] - cdf_bounds[0]]).T
         new_samples = np.sqrt(2)*erfinv(2*cdf-1).T
+        
         if len(new_samples) == 1:
             return new_samples[0]
+        
         return new_samples
     
     def initial_state(self):
