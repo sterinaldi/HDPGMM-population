@@ -17,16 +17,32 @@ class build_ext(_build_ext):
         self.include_dirs.append(numpy.get_include())
 
 ext_modules=[
-             Extension("utils",
-                       sources=["utils.pyx"],
+             Extension("hdpgmm.multidim.utils",
+                       sources=[os.path.join("hdpgmm/multidim","utils.pyx")],
                        libraries=["m"], # Unix-like specific
                        extra_compile_args=["-O3","-ffast-math"],
-                       include_dirs=[numpy.get_include()]
+                       include_dirs=['hdpgmm/multidim', numpy.get_include()]
                        )
              ]
-
+ext_modules = cythonize(ext_modules)
 setup(
-      name = "utils",
+      name = 'hdpgmm/multidim/utils',
       ext_modules = cythonize(ext_modules, language_level = "3"),
       include_dirs=[numpy.get_include()]
       )
+
+setup(
+    name = 'hdpgmm',
+    use_scm_version=True,
+    description = '(H)DPGMM: a Hierarchy of DPGMM',
+    author = 'Walter Del Pozzo, Stefano Rinaldi',
+    author_email = 'walter.delpozzo@unipi.it, stefano.rinaldi@phd.unipi.it',
+    url = 'https://git.ligo.org/stefano.rinaldi/hdp-population',
+    python_requires = '>=3.6',
+    packages = ['hdpgmm', 'hdpgmm.multidim'],
+    include_dirs = [numpy.get_include()],
+    setup_requires=['numpy', 'cython', 'setuptools_scm'],
+    entry_points={},
+    package_data={"": ['*.c', '*.pyx', '*.pxd']},
+    ext_modules=ext_modules,
+    )
