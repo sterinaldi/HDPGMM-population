@@ -22,14 +22,15 @@ ext_modules=[
                        libraries=["m"], # Unix-like specific
                        extra_compile_args=["-O3","-ffast-math"],
                        include_dirs=['hdpgmm/multidim', numpy.get_include()]
-                       )
+                       ),
+             Extension("hdpgmm.multidim.coordinates",
+                       sources=[os.path.join("hdpgmm/multidim","coordinates.pyx")],
+                       libraries=["m"], # Unix-like specific
+                       extra_compile_args=["-O3","-ffast-math"],
+                       include_dirs=['hdpgmm/multidim', numpy.get_include()]
+                       ),
              ]
 ext_modules = cythonize(ext_modules)
-setup(
-      name = 'hdpgmm/multidim/utils',
-      ext_modules = cythonize(ext_modules, language_level = "3"),
-      include_dirs=[numpy.get_include()]
-      )
 
 setup(
     name = 'hdpgmm',
@@ -38,7 +39,7 @@ setup(
     author = 'Walter Del Pozzo, Stefano Rinaldi',
     author_email = 'walter.delpozzo@unipi.it, stefano.rinaldi@phd.unipi.it',
     url = 'https://git.ligo.org/stefano.rinaldi/hdp-population',
-    python_requires = '>=3.6',
+    python_requires = '>=3.7',
     packages = ['hdpgmm', 'hdpgmm.multidim'],
     include_dirs = [numpy.get_include()],
     setup_requires=['numpy', 'cython', 'setuptools_scm'],
