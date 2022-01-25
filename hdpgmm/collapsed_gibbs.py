@@ -22,7 +22,6 @@ from time import perf_counter
 
 import ray
 from ray.util import ActorPool
-from ray.util.multiprocessing import Pool
 
 from hdpgmm.utils import integrand, compute_uflow_const, log_norm
 from matplotlib import rcParams
@@ -158,8 +157,8 @@ class CGSampler:
                        alpha0 = 1,
                        gamma0 = 1,
                        prior_ev = [1,1/4.], #a, V
-                       m_min = 5,
-                       m_max = 70,
+                       m_min = np.inf,
+                       m_max = -np.inf,
                        verbose = True,
                        diagnostic = False,
                        output_folder = './',
@@ -173,7 +172,8 @@ class CGSampler:
                        inj_post = None,
                        var_symbol = 'M',
                        unit = 'M_{\\odot}',
-                       restart = False
+                       restart = False,
+                       self.deltax = 1e-4
                        ):
         
         # Settings
@@ -191,7 +191,6 @@ class CGSampler:
         self.n_parallel_threads = n_parallel_threads
         self.events             = events
         self.m_max_plot         = m_max
-        self.event_samplers     = []
         
         if not seed == 0:
             self.rdstate = np.random.RandomState(seed = 1)
@@ -206,6 +205,20 @@ class CGSampler:
         sample_max           = np.max([np.max(a) for a in self.events])
         self.m_min           = min([m_min, sample_min])
         self.m_max           = max([m_max, sample_max])
+        
+        # Sanity check for zeros in bounds
+        for i in range(self.dim):
+            if self.m_min[i] == 0:
+                if self.sample_min > self.deltax:
+                    self.m_min[i] = self.deltax
+                else:
+                    self.m_min[i] = sample_min/2.
+            elif self.m_max[i] == 0:
+                if self.sample_min < -deltax:
+                    self.m_max[i] = -deltax
+                else:
+                    self.m_max[i] = sample_max/2.
+
         
         # Probit
         self.transformed_events = [self.transform(ev) for ev in events]
@@ -270,7 +283,7 @@ class CGSampler:
         event_samplers = []
         for i in range(self.n_parallel_threads):
             if not self.seed == 0:
-                rdstate = np.random.RandomState(seed = 1)
+                rdstate = np.random.RandomState(seed = i)
             else:
                 rdstate = np.random.RandomState()
             event_samplers.append(SE_Sampler.remote(
@@ -347,7 +360,7 @@ class CGSampler:
         print('{0} between {1} {3} and {2} {3}'.format(self.var_symbol, *np.round((self.m_min, self.m_max), decimals = 0), self.unit))
         print('Burn-in: {0} samples'.format(self.burnin_mf))
         print('Samples: {0} - 1 every {1}'.format(self.n_draws_mf, self.n_steps_mf))
-        print('Verbosity: {0} Diagnostic: {1} Reproducible run: {2}'.format(self.verbose, self.diagnostic, bool(self.seed)))
+        print('Verbosity: {0} Diagnostic: {1} Reproducible run: {2}'.format(bool(self.verbose), bool(self.diagnostic), bool(self.seed)))
         print('------------------------')
         return
     
@@ -447,7 +460,7 @@ class SE_Sampler:
                        n_draws,
                        n_steps,
                        alpha0 = 1,
-                       a = 3,
+                       a = 1,
                        V = 1/4.,
                        glob_m_max = None,
                        glob_m_min = None,
@@ -463,6 +476,7 @@ class SE_Sampler:
                        rdstate = None,
                        hierarchical_flag = False,
                        restart = False,
+                       deltax = 1e-4
                        ):
                        
         if rdstate == None:
@@ -496,6 +510,7 @@ class SE_Sampler:
         self.SuffStat = namedtuple('SuffStat', 'mean var N')
         self.hierarchical_flag = hierarchical_flag
         self.restart = restart
+        self.deltax = deltax
         # Output
         self.output_folder = output_folder
         self.verbose = verbose
@@ -833,7 +848,7 @@ class SE_Sampler:
             self.sample_mixture_parameters()
             if i%100 == 0:
                 self.save_assignment_state()
-            self.save_assignment_state()
+        self.save_assignment_state()
         if self.verbose:
             print('\n', end = '')
         return
@@ -933,7 +948,7 @@ class SE_Sampler:
         # plots concentration parameter
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))))
+        ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))), histtype = 'step', density = True)
         fig.savefig(Path(self.output_alpha, 'alpha_{0}.pdf'.format(self.e_ID)), bbox_inches='tight')
     
     def make_folders(self):
@@ -1091,6 +1106,20 @@ class SE_Sampler:
         
         self.m_min      = np.min([m_min, np.min(self.initial_samples)])
         self.m_max      = np.max([m_max, np.max(self.initial_samples)])
+
+        # Sanity check for zeros in bounds
+        for i in range(self.dim):
+            if self.m_min[i] == 0:
+                if m_min > self.deltax:
+                    self.m_min[i] = self.deltax
+                else:
+                    self.m_min[i] = m_min/2.
+            elif self.m_max[i] == 0:
+                if self.sample_max < -self.deltax:
+                    self.m_max[i] = -self.deltax
+                else:
+                    self.m_max[i] = m_max/2.
+
         self.m_min_plot = m_min
         self.m_max_plot = m_max
 
@@ -1187,7 +1216,6 @@ class MF_Sampler():
                        true_masses = None,
                        sigma_min = 0.005,
                        sigma_max = 0.7,
-                       m_max_plot = 50,
                        n_parallel_threads = 1,
                        ncheck = 5,
                        transformed = False,
@@ -1196,6 +1224,7 @@ class MF_Sampler():
                        unit = 'M_{\\odot}',
                        rdstate = None,
                        restart = False,
+                       deltax = 1e-4
                        ):
         
         if rdstate == None:
@@ -1208,6 +1237,14 @@ class MF_Sampler():
         self.n_steps = n_steps
         self.m_min   = m_min
         self.m_max   = m_max
+        
+        # Sanity check for zeros in bounds
+        for i in range(self.dim):
+            if self.m_min[i] == 0:
+                self.m_min[i] = deltax
+            elif self.m_max[i] == 0:
+                self.m_max[i] = -deltax
+
         if transformed:
             self.t_min = t_min
             self.t_max = t_max
@@ -1294,7 +1331,7 @@ class MF_Sampler():
         self.update_draws()
         if self.restart:
             try:
-                assign = np.genfromtxt(Path(self.output_assignment, 'assignment_mf.txt')).astype(int)
+                assign = np.genfromtxt(Path(self.output_folder, 'assignment_mf.txt')).astype(int)
             except:
                 assign = np.array([int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))])
         else:
@@ -1505,7 +1542,7 @@ class MF_Sampler():
         Plots the inferred distribution and saves draws.
         """
         # mass values
-        app  = np.linspace(self.m_min, self.m_max_plot, 1000)
+        app  = np.linspace(self.m_min_plot, self.m_max_plot, 1000)
         da = app[1]-app[0]
         percentiles = [50, 5,16, 84, 95]
         p = {}
