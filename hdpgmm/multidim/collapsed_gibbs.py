@@ -18,8 +18,7 @@ from scipy.stats import entropy, gamma, multivariate_t
 from scipy.special import logsumexp, betaln, gammaln, erfinv
 from scipy.interpolate import RegularGridInterpolator
 
-from hdpgmm.multidim.utils import integrand, compute_norm_const, log_norm, scalar_log_norm, make_sym_matrix, cartesian_to_celestial
-from hdpgmm.multidim.sampler_component_pars import sample_point, MH_single_event
+from hdpgmm.multidim.utils import integrand, log_norm, scalar_log_norm
 
 from time import perf_counter
 
@@ -184,23 +183,23 @@ class CGSampler:
                        initial_cluster_number = 5.,
                        process_events = True,
                        n_parallel_threads = 8,
-                       true_masses = None,
+                       true_samples = None,
                        names = None,
                        seed = 0,
                        var_names = None,
-                       n_samp_to_plot = None,
+                       n_samp_to_plot = 2000,
                        deltax = 1e-4, # Arbitrary choice!
                        restart = False,
                        n_gridpoints = 20,
                        ):
         
         # Settings
-        self.burnin_mf, self.n_draws_mf, self.step_mf = samp_settings
+        self.burnin_mf, self.n_draws_mf, self.n_steps_mf = samp_settings
         
         if samp_settings_ev is not None:
-            self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings_ev
+            self.burnin_ev, self.n_draws_ev, self.n_steps_ev = samp_settings_ev
         else:
-            self.burnin_ev, self.n_draws_ev, self.step_ev = samp_settings
+            self.burnin_ev, self.n_draws_ev, self.n_steps_ev = samp_settings
         
         self.restart            = restarts
         self.verbose            = verbose
@@ -248,7 +247,7 @@ class CGSampler:
 
         # Output
         self.output_folder  = Path(output_folder)
-        self.true_masses    = true_masses
+        self.true_samples   = true_samples
         self.output_recprob = Path(self.output_folder, 'reconstructed_events','mixtures')
         self.var_names      = var_names
         self.n_samp_to_plot = n_samp_to_plot
@@ -297,10 +296,11 @@ class CGSampler:
                 rdstate = np.random.RandomState(seed = i)
             else:
                 rdstate = np.random.RandomState()
-            event_samplers.append(SE_Sampler.remote( #FIXME: check args (from 1d)
+            event_samplers.append(SE_Sampler.remote(
                                             burnin        = self.burnin_ev,
                                             n_draws       = self.n_draws_ev,
                                             n_steps       = self.n_steps_ev,
+                                            dim           = self.dim,
                                             alpha0        = self.alpha0,
                                             a             = self.a_ev,
                                             V             = self.V_ev,
@@ -308,12 +308,11 @@ class CGSampler:
                                             glob_m_min    = self.m_min,
                                             output_folder = self.output_folder,
                                             verbose       = self.verbose,
-                                            diagnostic    = self.diagnostic,
                                             transformed   = True,
-                                            var_symbol    = self.var_symbol,
-                                            unit          = self.unit,
+                                            var_names     = self.var_names,
                                             rdstate       = rdstate,
                                             restart       = self.restart,
+                                            n_gridpoints  = self.n_gridpoints,
                                             initial_cluster_number = self.icn,
                                             hierarchical_flag = True,
                                             ))
@@ -338,7 +337,7 @@ class CGSampler:
         i = 0
         self.posterior_functions_events = []
         pool = self.initialise_samplers()
-        for s in pool.map(lambda a, v: a.run.remote(v), [[t_ev, id, None, ev, None, None] for ev, id, t_ev in zip(self.events, self.names, self.transformed_events)]): #FIXME: check args (from 1d)
+        for s in pool.map(lambda a, v: a.run.remote(v), [[t_ev, id, None, ev, None] for ev, id, t_ev in zip(self.events, self.names, self.transformed_events)]):
             self.posterior_functions_events.append(s)
             i += 1
             print('\rProcessed {0}/{1} events\r'.format(i, len(self.events)), end = '')
@@ -384,29 +383,28 @@ class CGSampler:
         self.mf_folder = Path(self.output_folder, 'mass_function')
         if not self.mf_folder.exists():
             self.mf_folder.mkdir()
-        flattened_transf_ev = np.array([x for ev in self.transformed_events for x in ev]) #FIXME: check args
-        sampler = MF_Sampler(self.posterior_functions_events,
-                       self.dim,
-                       self.burnin_mf,
-                       self.n_draws_mf,
-                       self.step_mf,
-                       alpha0 = self.gamma0,
-                       m_min = self.m_min,
-                       m_max = self.m_max,
-                       t_min = self.t_min,
-                       t_max = self.t_max,
-                       output_folder = self.mf_folder,
-                       initial_cluster_number = min([self.icn, len(self.posterior_functions_events)]),
-                       injected_density = self.injected_density,
-                       true_masses = self.true_masses,
-                       sigma_min = np.std(flattened_transf_ev)/16.,
-                       sigma_max = np.std(flattened_transf_ev)/3.,
-                       n_parallel_threads = self.n_parallel_threads,
-                       transformed = True,
-                       n_samp_to_plot = self.n_samp_to_plot,
-                       upper_bounds = self.upper_bounds,
-                       lower_bounds = self.lower_bounds
-                       )
+        sampler = MF_Sampler(posterior_functions_events = self.posterior_functions_events,
+                             dim                    = self.dim,
+                             burnin                 = self.burnin_mf,
+                             n_draws                = self.n_draws_mf,
+                             n_steps                = self.n_steps_mf,
+                             m_min                  = self.m_min,
+                             m_max                  = self.m_max,
+                             t_min                  = self.t_min,
+                             t_max                  = self.t_max,
+                             alpha0                 = self.gamma0,
+                             output_folder          = self.mf_folder,
+                             initial_cluster_number = self.icn,
+                             true_samples           = self.true_samples,
+                             sigma_min              = np.std(self.transf_ev, axis = 0)/16.,
+                             sigma_max              = np.std(self.transf_ev, axis = 0)/3.,
+                             n_parallel_threads     = self.n_parallel_threads,
+                             transformed            = True,
+                             var_names              = self.var_names,
+                             n_samp_to_plot         = self.n_samp_to_plot,
+                             rdstate                = self.rdstate,
+                             restart                = self.restart,
+                             )
         sampler.run()
     
     def run(self):
@@ -464,6 +462,7 @@ class SE_Sampler:
     def __init__(self, burnin,
                        n_draws,
                        n_steps,
+                       dim,
                        alpha0 = 1,
                        a = 1,
                        V = 1/4.,
@@ -480,6 +479,7 @@ class SE_Sampler:
                        hierarchical_flag = None,
                        restart = False,
                        n_gridpoints = 20,
+                       deltax = 1e-4,
                        ):
         
         if rdstate == None:
@@ -504,7 +504,7 @@ class SE_Sampler:
             self.sigma_max_from_data = False
             self.sigma_max = sigma_max
         
-        self.dim = len(mass_samples[-1])
+        self.dim = dim
 
         # DP parameters
         self.alpha0 = alpha0
@@ -516,6 +516,7 @@ class SE_Sampler:
         self.SuffStat = namedtuple('SuffStat', 'mean cov N')
         self.hierarchical_flag = hierarchical_flag
         self.restart = restart
+        self.deltax = deltax
         # Output
         self.output_folder = output_folder
         self.verbose = verbose
@@ -824,7 +825,7 @@ class SE_Sampler:
             print('\n', end = '')
         return
 
-    def postprocess(self, n_points = 30):
+    def postprocess(self):
         """
         Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
         """
@@ -836,13 +837,14 @@ class SE_Sampler:
         log_vol_el = np.sum([np.log(v[1]-v[0]) for v in points])
         gridpoints = np.array(list(itertools.product(*points)))
         percentiles = [50]
+        n_points = len(gridpoints)
         
         p = {}
         prob = []
         for i, ai in enumerate(gridpoints):
             a = self.transform([ai])
             #FIXME: scrivere log_norm in cython
-            print('\rGrid evaluation: {0}/{1}'.format(i+1, n_points**self.dim), end = '')
+            print('\rGrid evaluation: {0}/{1}'.format(i+1, n_points), end = '')
             logsum = np.sum([scalar_log_norm(par,0, 1) for par in a])
             prob.append([logsumexp([log_norm(a, component['mean'], component['cov']) + np.log(component['weight']) for component in sample.values()]) - logsum for sample in self.mixture_samples])
         prob = np.array(prob).reshape([n_points for _ in range(self.dim)] + [self.n_draws])
@@ -950,6 +952,20 @@ class SE_Sampler:
             else:
                 m_min = np.array([np.min(mi) for mi in np.array(samples).T])
                 m_max = np.array([np.min(mi) for mi in np.array(samples).T])
+        
+        # Sanity check for zeros in bounds
+        for i in range(self.dim):
+            if self.m_min[i] == 0:
+                if self.sample_min > self.deltax:
+                    self.m_min[i] = self.deltax
+                else:
+                    self.m_min[i] = self.sample_min/2.
+            elif self.m_max[i] == 0:
+                if self.sample_min < -self.deltax:
+                    self.m_max[i] = -self.deltax
+                else:
+                    self.m_max[i] = self.sample_min/2.
+        
         initial_assign = args[4]
         
         # Store arguments
@@ -1039,18 +1055,15 @@ class MF_Sampler():
                        dim,
                        burnin,
                        n_draws,
-                       step,
+                       n_steps,
                        m_min,
                        m_max,
-                       t_min,
-                       t_max,
+                       t_min = -4,
+                       t_max = 4,
                        alpha0 = 1,
                        output_folder = './',
                        initial_cluster_number = 5.,
-                       upper_bounds = None,
-                       lower_bounds = None,
-                       injected_density = None,
-                       true_masses = None,
+                       true_samples = None,
                        sigma_min = 0.003,
                        sigma_max = 0.7,
                        n_parallel_threads = 1,
@@ -1058,46 +1071,69 @@ class MF_Sampler():
                        transformed = False,
                        var_names = None,
                        n_samp_to_plot = 2000,
-                       n_points = 30 # np.linspace(min, max, n_points) for each variable
+                       n_gridpoints = 20,
+                       rdstate = None,
+                       restart = False,
+                       deltax = 1e-4,
                        ):
                        
-        self.burnin  = burnin
-        self.n_draws = n_draws
-        self.step    = step
+        if rdstate == None:
+            self.rdstate = np.random.RandomState()
+        else:
+            self.rdstate = rdstate
+    
+        self.posterior_functions_events = posterior_functions_events
+        self.true_samples = true_samples
+        self.dim = dim
+        
+        # Priors
         self.m_min   = m_min
         self.m_max   = m_max
-        self.lower_bounds = lower_bounds
-        self.upper_bounds = upper_bounds
-        
+        # Sanity check for zeros in bounds
+        for i in range(self.dim):
+            if self.m_min[i] == 0:
+                self.m_min[i] = deltax
+            elif self.m_max[i] == 0:
+                self.m_max[i] = -deltax
+
         if transformed:
             self.t_min = t_min
             self.t_max = t_max
         else:
             self.t_min = self.transform([m_min])
             self.t_max = self.transform([m_max])
-         
+        self.m_min_plot = m_min
+        self.m_max_plot = m_max
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
-        self.posterior_functions_events = posterior_functions_events
+        
+        # Settings
+        self.n_parallel_threads = n_parallel_threads
+        self.int_bounds = [[tmin, tmax] for tmin, tmax in zip(self.t_min, self.t_max)] + [[smin, smax] for smin, smax in zip(self.sigma_min, self.sigma_max)]
+        self.p       = ActorPool([ScoreComputer.remote(self.int_bounds, self.dim, self.output_folder, self.rdstate) for _ in range(n_parallel_threads)])
+        self.burnin  = burnin
+        self.n_draws = n_draws
+        self.n_steps = n_steps
+        self.ncheck  = ncheck
+        self.restart = restart
+        
         # DP parameters
         self.alpha0 = alpha0
-        # Miscellanea
-        self.icn    = initial_cluster_number
-        self.states = []
+        self.icn    = np.min([len(posterior_functions_events), initial_cluster_number])
         # Output
-        self.output_folder = output_folder
+        self.output_folder = Path(output_folder)
+        if not self.output_folder.exists():
+            self.output_folder.mkdir()
+
         self.mixture_samples = []
-        self.n_clusters = []
-        self.true_masses = true_masses
-        self.n_parallel_threads = n_parallel_threads
+        self.n_clusters = [self.icn]
         self.alpha_samples = []
-        self.ncheck = ncheck
         self.points = [np.linspace(l, u, n_points) for l, u in zip(self.lower_bounds, self.upper_bounds)]
         self.log_vol_el = np.sum([np.log(v[1]-v[0]) for v in self.points])
         self.gridpoints = np.array(list(itertools.product(*self.points)))
-        self.dim = dim
         self.n_samp_to_plot = n_samp_to_plot
-        self.p = Pool(n_parallel_threads)
+        self.var_names = var_names
+        
         
     def transform(self, samples):
         '''
@@ -1131,8 +1167,14 @@ class MF_Sampler():
         Creates initial state
         '''
         self.update_draws()
-        assign = [int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))]
-        cluster_ids = list(np.arange(int(np.max(assign)+1)))
+        if self.restart:
+            try:
+                assign = np.genfromtxt(Path(self.output_folder, 'assignment_mf.txt')).astype(int)
+            except:
+                assign = np.array([int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))])
+        else:
+            assign = np.array([int(a//(len(self.posterior_functions_events)/int(self.icn))) for a in range(len(self.posterior_functions_events))])
+        cluster_ids = list(set(assign))
         state = {
             'cluster_ids_': cluster_ids,
             'data_': self.posterior_draws,
@@ -1140,117 +1182,85 @@ class MF_Sampler():
             'alpha_': self.alpha0,
             'Ntot': len(self.posterior_draws),
             'assignment': assign,
-            'pi': {cid: self.alpha0 / self.icn for cid in cluster_ids},
             'ev_in_cl': {cid: list(np.where(np.array(assign) == cid)[0]) for cid in cluster_ids},
             'logL_D': {cid: None for cid in cluster_ids},
-            'starting_points': {}
+            'samples': {}
             }
+        
+        # Compute denominators
+        self.integrator = cpnest.CPNest(Integrator(self.int_bounds, [], self.dim),
+                                        verbose = 0,
+                                        nlive   = 200, #FIXME: too few for a reliable estimate?
+                                        maxmcmc = 1000,
+                                        nensemble = 1,
+                                        output = Path(self.output_folder, 'int_output'),
+                                        )
+        self.integrator.run()
+        state['logL_D']["new"] = self.integrator.logZ
+        state['samples']["new"] = np.fromiter(self.rdstate.choice(self.integrator.nested_samples), dtype = np.float64)[:-2]
         for cid in state['cluster_ids_']:
-            events = [self.posterior_draws[i] for i in state['ev_in_cl'][cid]]
-            n = len(events)
-            state['logL_D'][cid] = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max)
-        state['logL_D']["new"] = self.log_numerical_predictive([], self.t_min, self.t_max, self.sigma_min, self.sigma_max)
-        return state
+            self.integrator.user.events = [self.posterior_draws[i] for i in state['ev_in_cl'][cid]]
+            self.integrator.run()
+            state['logL_D'][cid] = self.integrator.logZ
+            state['samples'][cid] = np.fromiter(self.rdstate.choice(self.integrator.nested_samples), dtype = np.float64)[:-2]
+        
+        self.state = state
+        return
     
-    def log_predictive_likelihood(self, data_id, cluster_id, state):
-        '''
-        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster
-        '''
-        if cluster_id == "new":
-            events = []
-            return -logsumexp([np.log(tmax - tmin) for tmin, tmax in zip(t_min, t_max)]), -logsumexp([np.log(tmax - tmin) for tmin, tmax in zip(t_min, t_max)])
-        else:
-            events = [self.posterior_draws[i] for i in state['ev_in_cl'][cluster_id]]
-        n = len(events)
-        events.append(self.posterior_draws[data_id])
-        logL_D = state['logL_D'][cluster_id] #denominator
-        logL_N, starting_point = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max) #numerator
-        state['starting_points'][cluster_id] = starting_point
-        return logL_N - logL_D, logL_N
-
-    def log_numerical_predictive(self, events, t_min, t_max, sigma_min, sigma_max):
-        logN_cnst = compute_norm_const(np.zeros(self.dim), np.identity(self.dim), events) + logsumexp([np.log(tmax - tmin) for tmin, tmax in zip(t_min, t_max)]) + np.log(sigma_max - sigma_min)*self.dim*(self.dim - 1)/2.
-        bounds = [[tmin, tmax] for tmin, tmax in zip(t_min, t_max)] + [[sigma_min, sigma_max] for _ in range(int(self.dim*(self.dim - 1)/2.))]
-        integrator = Integrator(bounds, events, logN_cnst, self.dim)
-        work = cpnest.CPNest(integrator, verbose = 0, nlive = self.dim*(self.dim+3)+1, maxmcmc = 1000, nensemble = 1, output = self.output_folder)
-        work.run()
-        return work.NS.logZ, work.posterior_samples[-1]
-        #I, dI, d = nquad(integrand, bounds, args = [events, logN_cnst, self.dim])
-        #return np.log(I) + logN_cnst
     
-    def cluster_assignment_distribution(self, data_id, state):
+    def cluster_assignment_distribution(self, data_id):
         """
         Compute the marginal distribution of cluster assignment
         for each cluster.
         """
-        cluster_ids = list(state['ev_in_cl'].keys()) + ['new']
-        # can't pickle injected density
-#        saved_injected_density = self.injected_density
-        self.injected_density  = None
-#        with Pool(self.n_parallel_threads) as p:
-        output = self.p.map(self.compute_score, [[data_id, cid, state] for cid in cluster_ids])
-        scores = {out[0]: out[1] for out in output}
-        self.numerators = {out[0]: out[2] for out in output}
-#        self.injected_density = saved_injected_density
+        cluster_ids = list(self.state['ev_in_cl'].keys()) + ['new']
+        output = self.p.map(lambda a, v: a.compute_score.remote(v), [[] for cid in cluster_ids])
+        scores = {}
+        for out in output:
+            scores[out[0]] = out[1]
+            self.numerators[out[0]] = out[2]
+            self.starting_points[out[0]] = out[3]
         normalization = 1/sum(scores.values())
         scores = {cid: score*normalization for cid, score in scores.items()}
         return scores
-        
-    def compute_score(self, args):
-        data_id = args[0]
-        cid     = args[1]
-        state   = args[2]
-        score, logL_N = self.log_predictive_likelihood(data_id, cid, state)
-        score += self.log_cluster_assign_score(cid, state)
-        score = np.exp(score)
-        return [cid, score, logL_N]
-        
-        
-    def log_cluster_assign_score(self, cluster_id, state):
-        """
-        Log-likelihood that a new point generated will
-        be assigned to cluster_id given the current state.
-        """
-        if cluster_id == "new":
-            return np.log(state["alpha_"])
-        else:
-            if len(state['ev_in_cl'][cluster_id]) == 0:
-                return -np.inf
-            return np.log(len(state['ev_in_cl'][cluster_id]))
 
-    def create_cluster(self, state):
-        state["num_clusters_"] += 1
-        cluster_id = max(state['cluster_ids_']) + 1
-        state['cluster_ids_'].append(cluster_id)
-        state['ev_in_cl'][cluster_id] = []
-        state['starting_points'][cluster_id] = state['starting_points']["new"]
+    def create_cluster(self):
+        self.state["num_clusters_"] += 1
+        cluster_id = max(self.state['cluster_ids_']) + 1
+        self.state['cluster_ids_'].append(cluster_id)
+        self.state['ev_in_cl'][cluster_id] = []
+        self.state['samples'][cluster_id] = self.state['samples']["new"]
         return cluster_id
 
-    def destroy_cluster(self, state, cluster_id):
-        state["num_clusters_"] -= 1
-        state['cluster_ids_'].remove(cluster_id)
-        state['ev_in_cl'].pop(cluster_id)
+    def destroy_cluster(self, cluster_id):
+        self.state["num_clusters_"] -= 1
+        self.state['cluster_ids_'].remove(cluster_id)
+        self.state['ev_in_cl'].pop(cluster_id)
         
-    def prune_clusters(self,state):
-        for cid in state['cluster_ids_']:
-            if len(state['ev_in_cl'][cid]) == 0:
-                self.destroy_cluster(state, cid)
+        
+    def prune_clusters(self):
+        for cid in self.state['cluster_ids_']:
+            if len(self.state['ev_in_cl'][cid]) == 0:
+                self.destroy_cluster(cid)
 
-    def sample_assignment(self, data_id, state):
+    def sample_assignment(self, data_id):
         """
         Sample new assignment from marginal distribution.
         If cluster is "new", create a new cluster.
         """
         self.numerators = {}
-        scores = self.cluster_assignment_distribution(data_id, state).items()
+        self.samples = {}
+        scores = self.cluster_assignment_distribution(data_id).items()
         labels, scores = zip(*scores)
         cid = random.choice(labels, p=scores)
         if cid == "new":
-            new_cid = self.create_cluster(state)
-            state['logL_D'][int(new_cid)] = self.numerators[cid]
+            new_cid = self.create_cluster()
+            self.state['logL_D'][int(new_cid)] = self.numerators[cid]
+            self.state['samples'][int(new_cid)] = self.samples[cid]
             return new_cid
         else:
-            state['logL_D'][int(cid)] = self.numerators[int(cid)]
+            self.state['logL_D'][int(cid)] = self.numerators[int(cid)]
+            self.state['samples'][int(cid)] = self.samples[int(cid)]
             return int(cid)
 
     def update_draws(self):
@@ -1259,84 +1269,87 @@ class MF_Sampler():
             draws.append(posterior_samples[random.randint(len(posterior_samples))])
         self.posterior_draws = draws
     
-    def drop_from_cluster(self, state, data_id, cid):
-        state['ev_in_cl'][cid].remove(data_id)
-        events = [self.posterior_draws[i] for i in state['ev_in_cl'][cid]]
-        n = len(events)
-        state['logL_D'][cid] = self.log_numerical_predictive(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max)
+    def drop_from_cluster(self, data_id, cid):
+        self.state['ev_in_cl'][cid].remove(data_id)
+        events = [self.posterior_draws[i] for i in self.state['ev_in_cl'][cid]]
+        self.integrator.user.events = [self.posterior_draws[i] for i in self.state['ev_in_cl'][cid]]
+        self.integrator.run()
+        self.state['logL_D'][cid] = self.integrator.logZ
+        self.state['samples'][cid] = np.fromiter(self.rdstate.choice(self.integrator.nested_samples), dtype = np.float64)[:-2]
 
-    def add_to_cluster(self, state, data_id, cid):
-        state['ev_in_cl'][cid].append(data_id)
+    def add_to_cluster(self, data_id, cid):
+        self.state['ev_in_cl'][cid].append(data_id)
 
-    def update_alpha(self, state, trimming = 100):
+    def update_alpha(self, burnin = 200):
         '''
-        Updetes concentration parameter
+        Updates concentration parameter using a Metropolis-Hastings sampling scheme.
+        
+        Arguments:
+            :int burnin: MH burnin
+        
+        Returns:
+            :double: new concentration parametere value
         '''
-        a_old = state['alpha_']
-        n     = state['Ntot']
-        K     = len(state['cluster_ids_'])
-        for _ in range(trimming):
-            a_new = a_old + random.RandomState().uniform(-1,1)*0.5#.gamma(1)
+        a_old = self.state['alpha_']
+        n     = self.state['Ntot']
+        K     = len(self.state['cluster_ids_'])
+        for _ in range(burnin+self.rdstate.randint(100)):
+            a_new = a_old + self.rdstate.uniform(-1,1)*0.5
             if a_new > 0:
-                logP_old = numba_gammaln(a_old) - numba_gammaln(a_old + n) + K * np.log(a_old)
-                logP_new = numba_gammaln(a_new) - numba_gammaln(a_new + n) + K * np.log(a_new)
-                if logP_new - logP_old > np.log(random.uniform()):
+                logP_old = numba_gammaln(a_old) - numba_gammaln(a_old + n) + K * np.log(a_old) - 1./a_old
+                logP_new = numba_gammaln(a_new) - numba_gammaln(a_new + n) + K * np.log(a_new) - 1./a_new
+                if logP_new - logP_old > np.log(self.rdstate.uniform()):
                     a_old = a_new
         return a_old
     
-    def gibbs_step(self, state):
+    def gibbs_step(self):
         """
         Collapsed Gibbs sampler for Dirichlet Process Gaussian Mixture Model
         """
         self.update_draws()
-        state['alpha_'] = self.update_alpha(state)
-        self.alpha_samples.append(state['alpha_'])
-        pairs = zip(state['data_'], state['assignment'])
+        self.state['alpha_'] = self.update_alpha()
+        self.alpha_samples.append(self.state['alpha_'])
+        pairs = zip(self.state['data_'], self.state['assignment'])
         for data_id, (datapoint, cid) in enumerate(pairs):
-            self.drop_from_cluster(state, data_id, cid)
-            self.prune_clusters(state)
-            cid = self.sample_assignment(data_id, state)
-            self.add_to_cluster(state, data_id, cid)
-            state['assignment'][data_id] = cid
-        self.n_clusters.append(len(state['cluster_ids_']))
+            self.drop_from_cluster(data_id, cid)
+            self.prune_clusters()
+            cid = self.sample_assignment(data_id)
+            self.add_to_cluster(data_id, cid)
+            self.state['assignment'][data_id] = cid
+        self.n_clusters.append(len(self.state['cluster_ids_']))
     
-    def sample_mixture_parameters(self, state):
-        alpha = [len(state['ev_in_cl'][cid]) + state['alpha_'] / state['num_clusters_'] for cid in state['cluster_ids_']]
-        weights = stats.dirichlet(alpha).rvs(size=1).flatten()
+    def sample_mixture_parameters(self):
+        alpha = [len(self.state['ev_in_cl'][cid]) + self.state['alpha_'] / self.state['num_clusters_'] for cid in self.state['cluster_ids_']]
+        weights = self.rdstate.dirichlet(alpha).flatten()
         components = {}
-        for i, cid in enumerate(state['cluster_ids_']):
-            events = [self.posterior_draws[j] for j in state['ev_in_cl'][cid]]
-            m, s = sample_point(events, self.t_min, self.t_max, self.sigma_min, self.sigma_max, self.n_dim, state['starting_points'][cid])
-            components[i] = {'mean': m, 'sigma': s, 'weight': weights[i]}
+        for i, cid in enumerate(self.state['cluster_ids_']):
+            sample = self.state['samples'][cid]
+            mean = np.array(sample[:self.dim])
+            corr = np.identity(self.dim)/2.
+            corr[np.triu_indices(self.dim, 1)] = sample[2*self.dim:]
+            corr         = corr + corr.T
+            sigma        = sample[self.dim:2*self.dim]
+            ss           = np.outer(sigma,sigma)
+            cov = ss@corr
+            components[i] = {'mean': m, 'cov': cov, 'weight': weights[i]}
         self.mixture_samples.append(components)
-    
-    
-    def display_config(self):
-        print('MCMC Gibbs sampler')
-        print('------------------------')
-        print('Loaded {0} events'.format(len(self.mass_samples)))
-        print('Concentration parameters:\ngamma0 = {0}'.format(self.alpha0))
-        print('Burn-in: {0} samples'.format(self.burnin))
-        print('Samples: {0} - 1 every {1}'.format(self.n_draws, self.step))
-        print('------------------------')
-        return
 
-    def postprocess(self, n_points = 30):
+    def postprocess(self):
         """
         Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
         """
         
-#        app  = np.linspace(self.m_min*1.1, self.m_max_plot, 1000)
-#        da = app[1]-app[0]
-        percentiles = [50]#[50, 5,16, 84, 95]
-        
+        lower_bound = self.m_min_plot
+        upper_bound = self.m_max_plot
+        percentiles = [50]
         p = {}
+        n_points = len(self.gridpoints)
         
         prob = []
         for i, ai in enumerate(self.gridpoints):
             a = self.transform([ai])
             #FIXME: scrivere log_norm in cython
-            print('\rGrid evaluation: {0}/{1}'.format(i+1, n_points**self.dim), end = '')
+            print('\rGrid evaluation: {0}/{1}'.format(i+1, n_points), end = '')
             logsum = np.sum([scalar_log_norm(par,0, 1) for par in a])
             prob.append([logsumexp([log_norm(a, component['mean'], component['cov']) + np.log(component['weight']) for component in sample.values()]) - logsum for sample in self.mixture_samples])
         prob = np.array(prob).reshape([n_points for _ in range(self.dim)] + [self.n_draws])
@@ -1345,13 +1358,15 @@ class MF_Sampler():
         for i in range(self.n_draws):
             log_draws_interp.append(RegularGridInterpolator(self.points, prob[...,i] - logsumexp(prob[...,i] + self.log_vol_el)))
         
-        name = self.output_events + '/posterior_functions_mf_'
+        # Saves interpolant functions into json file
+        name = 'posterior_functions_mf_'
         extension ='.pkl'
         x = 0
-        fileName = name + str(x) + extension
-        while os.path.exists(fileName):
+        fileName = Path(self.output_folder, name + str(x) + extension)
+        while fileName.exists():
             x = x + 1
-            fileName = name + str(x) + extension
+            fileName = Path(self.output_folder, name + str(x) + extension)
+        
         picklefile = open(fileName, 'wb')
         pickle.dump(log_draws_interp, picklefile)
         picklefile.close()
@@ -1365,8 +1380,8 @@ class MF_Sampler():
         self.sample_probs = prob
         self.median_mf = np.array(p[50])
         names = ['m'] + [str(perc) for perc in percentiles]
-#        np.savetxt(self.output_events + '/log_rec_obs_prob_mf.txt', np.array([app, p[50], p[5], p[16], p[84], p[95]]).T, header = ' '.join(names))
-        picklefile = open(self.output_recprob + '/log_rec_prob_mf.pkl', 'wb')
+        
+        picklefile = open(Path(self.output_folder, 'log_rec_prob_mf.pkl'), 'wb')
         pickle.dump(RegularGridInterpolator(self.points, p[50]), picklefile)
         picklefile.close()
 
@@ -1381,13 +1396,14 @@ class MF_Sampler():
             c = corner(self.true_masses, fig = c, color = 'orange', labels = self.var_names, hist_kwargs={'density':True})
         c.savefig(self.output_pltevents + '/obs_mass_function.pdf', bbox_inches = 'tight')
         
-        name = self.output_events + '/posterior_mixtures_mf_'
+        name = 'posterior_mixtures_mf_'
         extension ='.pkl'
         x = 0
-        fileName = name + str(x) + extension
-        while os.path.exists(fileName):
+        fileName = Path(self.output_folder, name + str(x) + extension)
+        while fileName.exists():
             x = x + 1
-            fileName = name + str(x) + extension
+            fileName = Path(self.output_folder, name + str(x) + extension)
+        
         picklefile = open(fileName, 'wb')
         pickle.dump(self.mixture_samples, picklefile)
         picklefile.close()
@@ -1395,35 +1411,25 @@ class MF_Sampler():
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(np.arange(1,len(self.n_clusters)+1), self.n_clusters, ls = '--', marker = ',', linewidth = 0.5)
-        fig.savefig(self.output_events+'n_clusters_mf.pdf', bbox_inches='tight')
+        fig.savefig(Path(self.output_folder, 'n_clusters_mf.pdf'), bbox_inches='tight')
+        
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))))
-        fig.savefig(self.output_events+'/gamma_mf.pdf', bbox_inches='tight')
-        #FIXME: JS multidimensionale? (Vedi sopra)
-#        inj = np.array([self.injected_density(ai)/norm for ai in app])
-#        ent = js(p[50], inj)
-#        print('Jensen-Shannon distance: {0} nats'.format(ent))
-#        np.savetxt(self.output_events + '/relative_entropy.txt', np.array([ent]))
+        fig.savefig(Path(self.output_folder, 'gamma_mf.pdf'), bbox_inches='tight')
         
     
     def run(self):
         """
         Runs sampler, saves samples and produces output plots.
         """
-
-        # reconstructed events
-        self.output_events = self.output_folder
-        if not os.path.exists(self.output_events):
-            os.mkdir(self.output_events)
         self.run_sampling()
         self.postprocess()
         return
 
     def checkpoint(self):
-
         try:
-            picklefile = open(self.output_events + '/checkpoint.pkl', 'rb')
+            picklefile = open(Path(self.output_events, 'checkpoint.pkl'), 'rb')
             samps = pickle.load(picklefile)
             picklefile.close()
         except:
@@ -1433,6 +1439,7 @@ class MF_Sampler():
         for ai in self.gridpoints:
             a = self.transform([ai])
             #FIXME: scrivere log_norm in cython
+            print('\rGrid evaluation: {0}/{1} (checkpoint)'.format(i+1, n_points), end = '')
             logsum = np.sum([log_norm(par,0, 1) for par in a])
             prob.append([logsumexp([log_norm(a, component['mean'], component['cov']) + np.log(component['weight']) for component in sample.values()]) - logsum for sample in self.mixture_samples[-self.ncheck:]])
         prob = np.array(prob).reshape([n_points for _ in range(self.dim)] + [self.n_draws])
@@ -1442,7 +1449,7 @@ class MF_Sampler():
             log_draws_interp.append(RegularGridInterpolator(self.points, prob[...,i] - logsumexp(prob[...,i] + self.log_vol_el)))
         
         samps = samps + log_draws_interp
-        picklefile = open(self.output_events + '/checkpoint.pkl', 'wb')
+        picklefile = open(Path(self.output_folder, 'checkpoint.pkl'), 'wb')
         pickle.dump(samps, picklefile)
         picklefile.close()
 
@@ -1450,14 +1457,154 @@ class MF_Sampler():
         self.state = self.initial_state()
         for i in range(self.burnin):
             print('\rBURN-IN MF: {0}/{1}'.format(i+1, self.burnin), end = '')
-            self.gibbs_step(self.state)
+            self.gibbs_step()
         print('\n', end = '')
         for i in range(self.n_draws):
             print('\rSAMPLING MF: {0}/{1}'.format(i+1, self.n_draws), end = '')
-            for _ in range(self.step):
-                self.gibbs_step(self.state)
-            self.sample_mixture_parameters(self.state)
+            for _ in range(self.n_steps):
+                self.gibbs_step()
+            self.sample_mixture_parameters()
             if (i+1) % self.ncheck == 0:
                 self.checkpoint()
         print('\n', end = '')
+
+#------------#
+# Integrator #
+#------------#
+class Integrator(cpnest.model.Model):
+    
+    def __init__(self, bounds, events, logN_cnst, dim):
         
+        super(Integrator, self).__init__()
+        self.events    = events
+        self.logN_cnst = logN_cnst
+        self.dim       = dim
+        self.names     = ['m{0}'.format(i+1) for i in range(self.dim)] + ['s{0}'.format(i+1) for i in range(self.dim)] + ['r{0}'.format(j) for j in range(int(self.dim*(self.dim-1)/2.))]
+        self.bounds    = bounds + [[-1,1] for _ in range(int(self.dim*(self.dim-1)/2.))]
+    
+    def log_prior(self, x):
+        logP = super(Integrator, self).log_prior(x)
+        if not np.isfinite(logP):
+            return -np.inf
+            
+        self.mean = np.array(x.values[:self.dim])
+        
+        corr = np.identity(self.dim)/2.
+        corr[np.triu_indices(self.dim, 1)] = x.values[2*self.dim:]
+        corr         = corr + corr.T
+        sigma        = x.values[self.dim:2*self.dim]
+        ss           = np.outer(sigma,sigma)
+        self.cov_mat = ss@corr
+        
+        if not np.linalg.slogdet(self.cov_mat)[0] > 0:
+            return -np.inf
+        
+        return logP
+    
+    def log_likelihood(self, x):
+        return integrand(self.mean, self.covariance, self.events, self.logN_cnst, self.dim)
+
+@ray.remote
+class ScoreComputer:
+    def __init__(self, bounds, dim, output_folder, rdstate):
+        
+        self.bounds = bounds
+        self.dim    = dim
+        self.output_folder = output_folder
+        self.rdstate = rdstate
+        self.integrator = cpnest.CPNest(Integrator(self.bounds, [], self.dim),
+                                        verbose = 0,
+                                        nlive   = 200, #FIXME: too few for a reliable estimate?
+                                        maxmcmc = 1000,
+                                        nensemble = 1,
+                                        output = Path(self.output_folder, 'int_output'),
+                                        )
+
+
+    def compute_score(self, args):
+        """
+        Wrapper for log_predictive_likelihood and log_cluster_assign_score
+        (parallelized with Ray)
+        
+        Arguments:
+            :list args: list of arguments. Contains:
+                args[0]: sample index
+                args[1]: cluster index
+                args[2]: current state
+                args[3]: posterior draws (list)
+                args[4]: bounds (tuple (t_min, t_max, sigma_min, sigma_max))
+        Returns:
+            :list: list of computed values. Entries are:
+                ret[0]: cluster index
+                ret[1]: p_i for the considered cluster
+                ret[2]: log Likelihood
+                ret[3]: starting point for Metropolis-Hastings
+        """
+        data_id = args[0]
+        cid     = args[1]
+        state   = args[2]
+        posterior_draws = args[3]
+        
+        score, logL_N, sample = self.log_predictive_likelihood(data_id, cid, state, posterior_draws)
+        score += self.log_cluster_assign_score(cid, state)
+        score = np.exp(score)
+        return [cid, score, logL_N, sample]
+
+    def log_cluster_assign_score(self, cluster_id, state):
+        """
+        Log-likelihood that a new point generated will
+        be assigned to cluster_id given the current state. Eqs. (2.26) and (2.27)
+        
+        Arguments:
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
+        """
+        if cluster_id == "new":
+            return np.log(state["alpha_"])
+        else:
+            if len(state['ev_in_cl'][cluster_id]) == 0:
+                return -np.inf
+            return np.log(len(state['ev_in_cl'][cluster_id]))
+
+    def log_predictive_likelihood(self, data_id, cluster_id, state, posterior_draws):
+        '''
+        Computes the probability of a sample to be drawn from a cluster conditioned on all the samples assigned to the cluster - part of Eq. (2.39)
+        
+        Arguments:
+            :int data_id:    index of the considered sample
+            :int cluster_id: index of the considered cluster
+            :dict state:     current state
+        
+        Returns:
+            :double: log Likelihood
+        '''
+        if cluster_id == "new":
+            events = []
+        else:
+            events = [posterior_draws[i] for i in state['ev_in_cl'][cluster_id]]
+        events.append(posterior_draws[data_id])
+        logL_D = state['logL_D'][cluster_id] #denominator
+        self.integrator.user.events = events
+        self.integrator.run()
+        logL_N = self.integrator.logZ #numerator
+        sample = np.fromiter(self.rdstate.choice(self.integrator.nested_samples), dtype = np.float64)[:-2]
+        return logL_N - logL_D, logL_N, sample
+
+def MH_single_event(p, upper_bound, lower_bound, len, burnin = 1000, thinning = 100):
+    old_point = [(m_max + m_min)/2 for m_min, m_max in zip(lower_bound, upper_bound)]
+    delta = (upper_bound - lower_bound)/15
+    chain = []
+    for _ in range(burnin + thinning*len):
+        new_point = [o + dm*uniform(-1,1) for o, dm in zip(old_point, delta)]
+        try:
+            p_new = np.log(p(new_point))
+        except:
+            p_new = -np.inf
+        p_old = np.log(p(old_point))
+        if p_new - p_old > np.log(uniform(0,1)):
+            old_point = new_point
+        chain.append(old_point)
+    return chain[burnin::thinning]
