@@ -230,7 +230,7 @@ class CGSampler:
                 else:
                     self.m_min[i] = self.sample_min/2.
             elif self.m_max[i] == 0:
-                if self.sample_min < -deltax:
+                if self.sample_max < -deltax:
                     self.m_max[i] = -deltax
                 else:
                     self.m_max[i] = self.sample_min/2.
@@ -961,7 +961,7 @@ class SE_Sampler:
                 else:
                     self.m_min[i] = self.sample_min/2.
             elif self.m_max[i] == 0:
-                if self.sample_min < -self.deltax:
+                if self.sample_max < -self.deltax:
                     self.m_max[i] = -self.deltax
                 else:
                     self.m_max[i] = self.sample_min/2.
