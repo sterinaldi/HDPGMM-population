@@ -98,10 +98,10 @@ def main():
     (options, args) = parser.parse_args()
     
     # Converts relative paths to absolute paths
-    options.event_file = Path(str(options.event_file)).absolute()
-    options.output     = Path(str(options.output)).absolute()
+    options.event_file = Path(str(options.event_file)).resolve()
+    options.output     = Path(str(options.output)).resolve()
     if options.assign_file is not None:
-        options.assign_file = Path(str(options.assign_file)).absolute()
+        options.assign_file = Path(str(options.assign_file)).resolve()
     
     # If provided, reads optfile. Command-line inputs override file options.
     if options.optfile is not None:
