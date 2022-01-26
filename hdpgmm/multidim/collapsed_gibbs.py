@@ -5,7 +5,7 @@ import re
 import pickle
 
 from pathlib import Path
-
+from matplotlib import rcParams
 from corner import corner
 import cpnest.model
 import itertools
@@ -54,58 +54,12 @@ rcParams["axes.labelsize"]=16
 rcParams["axes.grid"] = True
 rcParams["grid.alpha"] = 0.6
 
-class Integrator(cpnest.model.Model):
-    
-    def __init__(self, bounds, events, logN_cnst, dim):
-        
-        super(Integrator, self).__init__()
-        self.events    = events
-        self.logN_cnst = logN_cnst
-        self.dim       = dim
-        self.names     = ['m{0}'.format(i+1) for i in range(self.dim)] + ['s{0}'.format(i+1) for i in range(self.dim)] + ['r{0}'.format(j) for j in range(int(self.dim*(self.dim-1)/2.))]
-        self.bounds    = bounds + [[-1,1] for _ in range(int(self.dim*(self.dim-1)/2.))]
-    
-    def log_prior(self, x):
-        logP = super(Integrator, self).log_prior(x)
-        if not np.isfinite(logP):
-            return -np.inf
-            
-        self.mean = np.array(x.values[:self.dim])
-        
-        corr = np.identity(self.dim)/2.
-        corr[np.triu_indices(self.dim, 1)] = x.values[2*self.dim:]
-        corr         = corr + corr.T
-        sigma        = x.values[self.dim:2*self.dim]
-        ss           = np.outer(sigma,sigma)
-        self.cov_mat = ss@corr
-        
-        if not np.linalg.slogdet(self.cov_mat)[0] > 0:
-            return -np.inf
-        
-        return logP
-    
-    def log_likelihood(self, x):
-        return integrand(self.mean, self.covariance, self.events, self.logN_cnst, self.dim)
-
 """
 Implemented as in https://dp.tdhopper.com/collapsed-gibbs/
 """
 
 # natural sorting.
 # list.sort(key = natural_keys)
-
-def sort_matrix(a, axis = -1):
-    '''
-    Matrix sorting algorithm
-    '''
-    mat = np.array([[m, f] for m, f in zip(a[0], a[1])])
-    keys = np.array([x for x in mat[:,axis]])
-    sorted_keys = np.copy(keys)
-    sorted_keys = np.sort(sorted_keys)
-    indexes = [np.where(el == keys)[0][0] for el in sorted_keys]
-    sorted_mat = np.array([mat[i] for i in indexes])
-    return sorted_mat[:,0], sorted_mat[:,1]
-    
 
 def atoi(text):
     return int(text) if text.isdigit() else text
@@ -267,15 +221,17 @@ class CGSampler:
         Returns:
             :float or np.ndarray: transformed sample(s)
         '''
-        
-        if self.m_min > 0:
-            min = self.m_min*0.9999
-        else:
-            min = self.m_min*1.0001
-        if self.m_max > 0:
-            max = self.m_max*1.0001
-        else:
-            max = self.m_max*0.9999
+        min = np.zeros(self.dim)
+        max = np.zeros(self.dim)
+        for i in range(self.dim):
+            if self.glob_m_min[i] > 0:
+                min[i] = self.glob_m_min[i]*0.9999
+            else:
+                min[i] = self.glob_m_min[i]*1.0001
+            if self.m_max[i] > 0:
+                max[i] = self.glob_m_max[i]*1.0001
+            else:
+                max[i] = self.glob_m_max[i]*0.9999
         cdf_bounds = [min, max]
         
         cdf = (np.array(samples).T - np.atleast_2d([cdf_bounds[0]]).T)/np.array([cdf_bounds[1] - cdf_bounds[0]]).T
@@ -523,8 +479,9 @@ class SE_Sampler:
         self.transformed = transformed
         self.var_names = var_names
         self.n_gridpoints = np.atleast_1d(n_gridpoints)
-        if len(self.n_gridpoints) == (1 or self.dim):
-            self.n_gridpoints = self.n_gridpoints*np.ones(self.dim)
+
+        if len(self.n_gridpoints) == 1 or len(self.n_gridpoints) == self.dim:
+            self.n_gridpoints = self.n_gridpoints*np.ones(self.dim, dtype = int)
         else:
             print('n_gridpoints is not scalar but its dimensions does not match the data point dimensions.')
             exit()
@@ -543,15 +500,17 @@ class SE_Sampler:
         Returns:
             :float or np.ndarray: transformed sample(s)
         '''
-        
-        if self.glob_m_min > 0:
-            min = self.glob_m_min*0.9999
-        else:
-            min = self.glob_m_min*1.0001
-        if self.m_max > 0:
-            max = self.glob_m_max*1.0001
-        else:
-            max = self.glob_m_max*0.9999
+        min = np.zeros(self.dim)
+        max = np.zeros(self.dim)
+        for i in range(self.dim):
+            if self.glob_m_min[i] > 0:
+                min[i] = self.glob_m_min[i]*0.9999
+            else:
+                min[i] = self.glob_m_min[i]*1.0001
+            if self.m_max[i] > 0:
+                max[i] = self.glob_m_max[i]*1.0001
+            else:
+                max[i] = self.glob_m_max[i]*0.9999
         
         cdf_bounds = [min, max]
         cdf = (np.array(samples).T - np.atleast_2d([cdf_bounds[0]]).T)/np.array([cdf_bounds[1] - cdf_bounds[0]]).T
@@ -631,7 +590,6 @@ class SE_Sampler:
             ss = self.SuffStat(np.atleast_2d(0),np.identity(self.dim)*0,0)
         else:
             ss  = self.state['suffstats'][cluster_id]
-            
         x = self.state['data_'][data_id]
         mean = ss.mean
         S    = ss.cov
@@ -652,8 +610,6 @@ class SE_Sampler:
         x = np.atleast_2d(x)
         mean = (ss.mean*(ss.N)+x)/(ss.N+1)
         cov  = (ss.N*(ss.cov + np.matmul(ss.mean.T, ss.mean)) + np.matmul(x.T, x))/(ss.N+1) - np.matmul(mean.T, mean)
-        if (cov < 0).any(): # Numerical issue for clusters with one sample (variance = 0)
-            cov[cov < 0] = 0
         return self.SuffStat(mean, cov, ss.N+1)
 
 
@@ -663,8 +619,6 @@ class SE_Sampler:
             return(self.SuffStat(np.atleast_2d(0),np.identity(self.dim)*0,0))
         mean = (ss.mean*(ss.N)-x)/(ss.N-1)
         cov  = (ss.N*(ss.cov + np.matmul(ss.mean.T, ss.mean)) - np.matmul(x.T, x))/(ss.N-1) - np.matmul(mean.T, mean)
-        if (cov < 0).any(): # Numerical issue for clusters with one sample (variance = 0)
-            cov[cov < 0] = 0
         return self.SuffStat(mean, cov, ss.N-1)
         
     def cluster_assignment_distribution(self, data_id):
@@ -699,7 +653,7 @@ class SE_Sampler:
             return np.log(self.state['suffstats'][cluster_id].N)
 
     def create_cluster(self):
-        state["num_clusters_"] += 1
+        self.state["num_clusters_"] += 1
         cluster_id = max(self.state['suffstats'].keys()) + 1
         self.state['suffstats'][cluster_id] = self.SuffStat(np.atleast_2d(0),np.identity(self.dim)*0,0)
         self.state['cluster_ids_'].append(cluster_id)
@@ -756,7 +710,7 @@ class SE_Sampler:
                     a_old = a_new
         return a_old
 
-    def gibbs_step(self, state):
+    def gibbs_step(self):
         """
         Collapsed Gibbs sampler for Dirichlet Process Gaussian Mixture Model
         """
@@ -830,6 +784,10 @@ class SE_Sampler:
         Plots samples [x] for each event in separate plots along with inferred distribution and saves draws.
         """
         
+        picklefile = open(Path(self.output_mixtures, 'posterior_functions_{0}.pkl'.format(self.e_ID)), 'wb')
+        pickle.dump(self.mixture_samples, picklefile)
+        picklefile.close()
+        
         lower_bound = np.maximum(self.m_min, self.glob_m_min)
         upper_bound = np.minimum(self.m_max, self.glob_m_max)
         
@@ -847,7 +805,7 @@ class SE_Sampler:
             print('\rGrid evaluation: {0}/{1}'.format(i+1, n_points), end = '')
             logsum = np.sum([scalar_log_norm(par,0, 1) for par in a])
             prob.append([logsumexp([log_norm(a, component['mean'], component['cov']) + np.log(component['weight']) for component in sample.values()]) - logsum for sample in self.mixture_samples])
-        prob = np.array(prob).reshape([n_points for _ in range(self.dim)] + [self.n_draws])
+        prob = np.array(prob).reshape(list(self.n_gridpoints) + [self.n_draws])
         
         log_draws_interp = []
         for i in range(self.n_draws):
@@ -873,16 +831,12 @@ class SE_Sampler:
             p[perc] = p[perc]/np.exp(normalisation)
             
         prob = np.array(prob)
-
-        picklefile = open(Path(self.output_mixtures, 'posterior_functions_{0}.pkl'.format(self.e_ID)), 'wb')
-        pickle.dump(self.mixture_samples, picklefile)
-        picklefile.close()
         
         self.sample_probs = prob
         self.median = np.array(p[50])
         self.points = points
         
-        samples_to_plot = np.array(MH_single_event(RegularGridInterpolator(points, p[50]), upper_bound, lower_bound, len(self.samples)))
+        samples_to_plot = np.array(MH_single_event(RegularGridInterpolator(points, p[50]), upper_bound, lower_bound, len(self.samples), self.rdstate))
         c = corner(self.initial_samples, color = 'orange', labels = self.var_names, hist_kwargs={'density':True})
         c = corner(samples_to_plot, fig = c, color = 'blue', labels = self.var_names, hist_kwargs={'density':True})
         c.savefig(Path(self.output_pltevents, '{0}.pdf'.format(self.e_ID)), bbox_inches = 'tight')
@@ -897,7 +851,7 @@ class SE_Sampler:
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.hist(self.alpha_samples, bins = int(np.sqrt(len(self.alpha_samples))), histtype = 'step', density = True)
-        fig.savefig(Path(self.alpha_folder, 'alpha_{0}.pdf'.format(self.e_ID)), bbox_inches='tight')
+        fig.savefig(Path(self.output_alpha, 'alpha_{0}.pdf'.format(self.e_ID)), bbox_inches='tight')
     
     def make_folders(self):
         """
@@ -953,26 +907,26 @@ class SE_Sampler:
                 m_min = np.array([np.min(mi) for mi in np.array(samples).T])
                 m_max = np.array([np.min(mi) for mi in np.array(samples).T])
         
-        # Sanity check for zeros in bounds
-        for i in range(self.dim):
-            if self.m_min[i] == 0:
-                if self.sample_min > self.deltax:
-                    self.m_min[i] = self.deltax
-                else:
-                    self.m_min[i] = self.sample_min/2.
-            elif self.m_max[i] == 0:
-                if self.sample_max < -self.deltax:
-                    self.m_max[i] = -self.deltax
-                else:
-                    self.m_max[i] = self.sample_max/2.
-        
-        initial_assign = args[4]
-        
         # Store arguments
-        if real_masses is None:
+        if real_samples is None:
             self.initial_samples = samples
         else:
             self.initial_samples = real_samples
+        
+        # Sanity check for zeros in bounds
+        for i in range(self.dim):
+            if m_min[i] == 0:
+                if self.sample_min > self.deltax:
+                    m_min[i] = self.deltax
+                else:
+                    m_min[i] = np.min(self.initial_samples[:,i])/2.
+            elif m_max[i] == 0:
+                if self.sample_max < -self.deltax:
+                    m_max[i] = -self.deltax
+                else:
+                    m_max[i] = np.max(self.initial_samples[:,i])/2.
+        
+        initial_assign = args[4]
             
         self.initial_assign = initial_assign
         self.e_ID           = event_id
@@ -988,7 +942,7 @@ class SE_Sampler:
             self.glob_m_max = self.m_max
         
         # Check consistency
-        if real_masses is None and self.transformed:
+        if real_samples is None and self.transformed:
             raise ValueError('Samples are expected to be already transformed but no initial samples are provided.')
             exit()
 
@@ -1004,7 +958,7 @@ class SE_Sampler:
         if self.sigma_max_from_data:
             self.sigma_max = np.std(self.samples, axis = 0)/2.
         
-        self.b  = self.a*(self.sigma_max/2.)**2
+        self.L  = self.nu*(np.identity(self.dim)*self.sigma_max/2.)**2
         self.mu = np.mean(self.samples, axis = 0)
 
         self.alpha_samples = []
@@ -1144,14 +1098,17 @@ class MF_Sampler():
         Returns:
             :float or np.ndarray: transformed sample(s)
         '''
-        if self.m_min > 0:
-            min = self.m_min*0.9999
-        else:
-            min = self.m_min*1.0001
-        if self.m_max > 0:
-            max = self.m_max*1.0001
-        else:
-            max = self.m_max*0.9999
+        min = np.zeros(self.dim)
+        max = np.zeros(self.dim)
+        for i in range(self.dim):
+            if self.glob_m_min[i] > 0:
+                min[i] = self.glob_m_min[i]*0.9999
+            else:
+                min[i] = self.glob_m_min[i]*1.0001
+            if self.m_max[i] > 0:
+                max[i] = self.glob_m_max[i]*1.0001
+            else:
+                max[i] = self.glob_m_max[i]*0.9999
         cdf_bounds = [min, max]
         
         cdf = (np.array(samples).T - np.atleast_2d([cdf_bounds[0]]).T)/np.array([cdf_bounds[1] - cdf_bounds[0]]).T
@@ -1390,11 +1347,11 @@ class MF_Sampler():
         for perc in percentiles:
             p[perc] = p[perc]/np.exp(normalisation)
         
-        samples_to_plot = MH_single_event(RegularGridInterpolator(points, p[50]), self.upper_bounds, self.lower_bounds, self.n_samp_to_plot)
+        samples_to_plot = MH_single_event(RegularGridInterpolator(points, p[50]), self.upper_bounds, self.lower_bounds, self.n_samp_to_plot, self.rdstate)
         c = corner(samples_to_plot, color = 'blue', labels = self.var_names, hist_kwargs={'density':True})
         if self.true_masses is not None:
             c = corner(self.true_masses, fig = c, color = 'orange', labels = self.var_names, hist_kwargs={'density':True})
-        c.savefig(self.output_pltevents + '/obs_mass_function.pdf', bbox_inches = 'tight')
+        c.savefig(Path(self.output_pltevents + 'obs_mass_function.pdf'), bbox_inches = 'tight')
         
         name = 'posterior_mixtures_mf_'
         extension ='.pkl'
@@ -1593,18 +1550,18 @@ class ScoreComputer:
         sample = np.fromiter(self.rdstate.choice(self.integrator.nested_samples), dtype = np.float64)[:-2]
         return logL_N - logL_D, logL_N, sample
 
-def MH_single_event(p, upper_bound, lower_bound, len, burnin = 1000, thinning = 100):
+def MH_single_event(p, upper_bound, lower_bound, len, rdstate, burnin = 1000, thinning = 100):
     old_point = [(m_max + m_min)/2 for m_min, m_max in zip(lower_bound, upper_bound)]
     delta = (upper_bound - lower_bound)/15
     chain = []
     for _ in range(burnin + thinning*len):
-        new_point = [o + dm*uniform(-1,1) for o, dm in zip(old_point, delta)]
+        new_point = [o + dm*rdstate.uniform(-1,1) for o, dm in zip(old_point, delta)]
         try:
             p_new = np.log(p(new_point))
         except:
             p_new = -np.inf
         p_old = np.log(p(old_point))
-        if p_new - p_old > np.log(uniform(0,1)):
+        if p_new - p_old > np.log(rdstate.uniform(0,1)):
             old_point = new_point
         chain.append(old_point)
     return chain[burnin::thinning]
