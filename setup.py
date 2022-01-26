@@ -5,8 +5,12 @@ from setuptools.command.build_ext import build_ext as _build_ext
 from codecs import open
 from os import path
 from distutils.extension import Extension
-from Cython.Build import cythonize
 import os
+
+try:
+    from Cython.Build import cythonize
+except ModuleNotFoundError:
+    print('Cython not found. Please install it via\n\tpip install Cython')
 
 # see https://stackoverflow.com/a/21621689/1862861 for why this is here
 class build_ext(_build_ext):
@@ -30,7 +34,7 @@ ext_modules=[
                        include_dirs=['hdpgmm/multidim', numpy.get_include()]
                        ),
              ]
-ext_modules = cythonize(ext_modules)
+ext_modules = cythonize(ext_modules, compiler_directives={'language_level' : "3"})
 
 setup(
     name = 'hdpgmm',
