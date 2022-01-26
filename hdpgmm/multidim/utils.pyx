@@ -15,21 +15,27 @@ cdef inline double _scalar_log_norm(double x, double x0, double s) nogil: return
 @cython.wraparound(False)
 @cython.nonecheck(False)
 @cython.cdivision(True)
-cdef double _log_norm(np.ndarray x, np.ndarray x0, np.ndarray sigma):
-    try:
-        logP = mn(mean = x0, cov = sigma).logpdf(x)
-    except:
-        logP = -np.inf
-    return logP
-    #cdef np.ndarray diff = x-x0
-    #cdef double D = det(sigma)
-    #return -np.dot(diff.T, np.dot(inv(sigma), diff)) -n*0.5*LOGSQRT2 -0.5*log(D)
+cdef double _triple_product(double[:] x, double[:] mu, double[:,:] inv_cov) nogil:
+    cdef unsigned int i,j
+    cdef unsigned int n = x.shape[0]
+    cdef double res     = 0.0
+    for i in range(n):
+        for j in range(n):
+            res += inv_cov[i,j]*(x[i]-mu[i])*(x[j]-mu[j])
+    return res
 
-
-#solo un alias per scipy.stats.multivariate_normal
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.nonecheck(False)
+@cython.cdivision(True)
+cdef double _log_norm(double[:] x, double[:] mu, double[:,:] cov):
+    cdef double[:,:] inv_cov = np.linalg.inv(cov)
+    cdef double exponent     = -0.5*_triple_product(x, mu, inv_cov)
+    cdef double lognorm      = LOGSQRT2-0.5*np.linalg.slogdet(inv_cov)[1]
+    return -lognorm+exponent
+             
 def log_norm(np.ndarray x, np.ndarray x0, np.ndarray sigma):
-    return mn(mean = x0, cov = sigma).logpdf(x)
-    #return _log_norm(x, x0, sigma, n)
+    return _log_norm(x, x0, sigma)
 
 def scalar_log_norm(double x, double x0, double s):
     return _scalar_log_norm(x,x0,s)
@@ -67,26 +73,3 @@ cdef double _integrand(double[:] mean, double[:,:] covariance, list events, unsi
 def integrand(double[:] mean, double[:,:] covariance, list events, unsigned int dim):
     return _integrand(mean, covariance, events, dim)
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
-@cython.nonecheck(False)
-@cython.cdivision(True)
-cdef double _triple_product(double[:] x, double[:,:] inv_cov) nogil:
-    cdef unsigned int i,j
-    cdef unsigned int n = x.shape[0]
-    cdef double res     = 0.0
-    for i in range(n):
-        for j in range(n):
-            res += inv_cov[i,j]*x[i]*x[j]
-    return res
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-@cython.nonecheck(False)
-@cython.cdivision(True)
-cdef double _log_mvn(double[:] x, double[:] mu, double[:,:] cov):
-    cdef double[:,:] inv_cov = np.linalg.inv(cov)
-    cdef double exponent     = -0.5*_triple_product(x - mu, inv_cov)
-    cdef double lognorm      = mu.shape[0]*LOGSQRT2-np.linalg.slogdet(inv_cov)[1]
-    return -lognorm+exponent
-             
