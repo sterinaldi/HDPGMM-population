@@ -204,7 +204,7 @@ class CGSampler:
         self.true_samples   = true_samples
         self.output_recprob = Path(self.output_folder, 'reconstructed_events','mixtures')
         self.var_names      = var_names
-        self.n_samp_to_plot = n_samp_to_plot
+        self.n_samp_to_plot = np.min([n_samp_to_plot, 1000])
         self.n_gridpoints   = n_gridpoints
         
         if names is not None:
