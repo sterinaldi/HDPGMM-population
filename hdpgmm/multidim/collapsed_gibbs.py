@@ -44,7 +44,6 @@ def numba_gammaln(x):
   return gammaln_float64(x)
 
 if find_executable('latex'):
-    print(rcParams)
     rcParams["text.usetex"] = True
 rcParams["xtick.labelsize"]=14
 rcParams["ytick.labelsize"]=14
