@@ -91,7 +91,7 @@ def main():
     parser.add_option("--xmin", type = "string", dest = "xmin", help = "Low bounds for parameters", default = None)
     parser.add_option("--xmax", type = "string", dest = "xmax", help = "High bounds for parameters", default = None)
     parser.add_option("--alpha", type = "float", dest = "alpha0", help = "Internal (event) initial concentration parameter", default = 1.)
-    parser.add_option("--sigma_max", type = "float", dest = "sigma_max", help = "Maximum std for clusters", default = None)
+    parser.add_option("--sigma_max", type = "string", dest = "sigma_max", help = "Maximum std for clusters", default = None)
     
     # Others
     parser.add_option("--cosmology", type = "string", dest = "cosmology", help = "Cosmological parameters (h, om, ol). Default values from Planck (2021)", default = '0.674,0.315,0.685')
