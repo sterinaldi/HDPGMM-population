@@ -41,7 +41,7 @@ def load_single_event(event, seed = 0, par = ['m1','m2'], n_samples = -1, h = 0.
     else:
         out = unpack_gw_posterior(event, par = par, n_samples = n_samples, cosmology = (h, om, ol), rdstate = rdstate)
     
-    out = sort_matrix(out)
+    out = sort_samples(out)
     return out, name
 
 def load_data(path, seed = 0, par = ['m1', 'm2'], n_samples = -1, h = 0.674, om = 0.315, ol = 0.685):
@@ -96,7 +96,7 @@ def load_data(path, seed = 0, par = ['m1', 'm2'], n_samples = -1, h = 0.674, om 
             else:
                 if not os.stat(event).st_size == 0:
                     samples = np.atleast_2d(np.genfromtxt(event))
-                    events.append(sort_matrix(samples))
+                    events.append(sort_samples(samples))
                 else:
                     empty_file_counter += 1
                     empty_files.append(str(event))
