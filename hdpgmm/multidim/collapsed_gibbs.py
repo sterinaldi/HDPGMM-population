@@ -14,7 +14,7 @@ from collections import namedtuple, Counter
 from numpy import random
 
 from scipy import stats
-from scipy.stats import entropy, gamma, multivariate_t
+from scipy.stats import gamma, multivariate_t
 from scipy.special import logsumexp, betaln, gammaln, erfinv
 from scipy.interpolate import RegularGridInterpolator
 
@@ -858,8 +858,8 @@ class SE_Sampler:
         Creates directories.
         """
         self.output_events = Path(self.output_folder, 'reconstructed_events')
-        dirs       = ['rec_prob', 'n_clusters', 'events', 'mixtures', 'posteriors', 'entropy', 'alpha', 'assignment']
-        attr_names = ['output_recprob', 'output_n_clusters', 'output_pltevents', 'output_mixtures', 'output_posteriors', 'output_entropy', 'output_alpha', 'output_assignment']
+        dirs       = ['rec_prob', 'n_clusters', 'events', 'mixtures', 'posteriors', 'alpha', 'assignment']
+        attr_names = ['output_recprob', 'output_n_clusters', 'output_pltevents', 'output_mixtures', 'output_posteriors', 'output_alpha', 'output_assignment']
         
         if not self.output_events.exists():
             self.output_events.mkdir()
