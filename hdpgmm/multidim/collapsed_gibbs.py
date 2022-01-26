@@ -762,13 +762,13 @@ class SE_Sampler:
         self.initial_state(self.samples)
         for i in range(self.burnin):
             if self.verbose:
-                print('\rBURN-IN: {0}/{1}'.format(i+1, self.burnin), end = '')
+                print('BURN-IN: {0}/{1}\033[A'.format(i+1, self.burnin))
             self.gibbs_step()
         if self.verbose:
             print('\n', end = '')
         for i in range(self.n_draws):
             if self.verbose:
-                print('\rSAMPLING: {0}/{1}'.format(i+1, self.n_draws), end = '')
+                print('SAMPLING: {0}/{1}\033[A'.format(i+1, self.n_draws))
             for _ in range(self.n_steps):
                 self.gibbs_step()
             self.sample_mixture_parameters()
@@ -803,9 +803,11 @@ class SE_Sampler:
             a = self.transform([ai])
             #FIXME: scrivere log_norm in cython
             if self.verbose:
-                print('\rGrid evaluation: {0}/{1}'.format(i+1, n_points), end = '')
+                print('Grid evaluation: {0}/{1}\033[A'.format(i+1, n_points))
             logsum = np.sum([scalar_log_norm(par,0, 1) for par in a])
             prob.append([logsumexp([log_norm(a, component['mean'], component['cov']) + np.log(component['weight']) for component in sample.values()]) - logsum for sample in self.mixture_samples])
+        if self.verbose:
+            print('\n')
         prob = np.array(prob).reshape(list(self.n_gridpoints) + [self.n_draws])
         
         log_draws_interp = []
