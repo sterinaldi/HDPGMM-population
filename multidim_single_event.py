@@ -84,6 +84,7 @@ def main():
     parser.add_option("--n_samps_dsp", dest = "n_samples_dsp", default = -1, help = "Number of samples to analyse (downsampling). Default: all")
     parser.add_option("-r", "--restart", dest = "restart", default = False, action = 'store_true', help = "Restart from checkpoint or last state. Requires the analysis to be run at least once before, otherwise the inital assignment will fall back to the default assignment")
     parser.add_option("--n_grid", dest = "n_gridpoints", type = "string", help = "Grid points for each parameter (single value or array)", default = '20')
+    parser.add_option("-v", "--verbose", dest = "verbose", default = True, action = 'store_false', help = "Suppress output")
     
     # Priors
     parser.add_option("--prior", type = "string", dest = "prior", help = "Parameters for NIG prior (a0, V0). See https://www.cs.ubc.ca/~murphyk/Papers/bayesGauss.pdf sec. 6 for reference", default = '1,1')
@@ -190,7 +191,7 @@ def main():
                                 a = float(options.a),
                                 V = float(options.V),
                                 output_folder = options.output,
-                                verbose = True,
+                                verbose = bool(options.verbose),
                                 initial_cluster_number = int(options.initial_cluster_number),
                                 transformed = False,
                                 var_names = options.symbol,

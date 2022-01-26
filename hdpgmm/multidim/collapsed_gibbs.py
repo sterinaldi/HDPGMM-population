@@ -802,7 +802,8 @@ class SE_Sampler:
         for i, ai in enumerate(gridpoints):
             a = self.transform([ai])
             #FIXME: scrivere log_norm in cython
-            print('\rGrid evaluation: {0}/{1}'.format(i+1, n_points), end = '')
+            if self.verbose:
+                print('\rGrid evaluation: {0}/{1}'.format(i+1, n_points), end = '')
             logsum = np.sum([scalar_log_norm(par,0, 1) for par in a])
             prob.append([logsumexp([log_norm(a, component['mean'], component['cov']) + np.log(component['weight']) for component in sample.values()]) - logsum for sample in self.mixture_samples])
         prob = np.array(prob).reshape(list(self.n_gridpoints) + [self.n_draws])
