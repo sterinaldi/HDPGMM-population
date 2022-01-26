@@ -801,7 +801,6 @@ class SE_Sampler:
         prob = []
         for i, ai in enumerate(gridpoints):
             a = self.transform([ai])
-            #FIXME: scrivere log_norm in cython
             if self.verbose:
                 print('Grid evaluation: {0}/{1}\033[A'.format(i+1, n_points))
             logsum = np.sum([scalar_log_norm(par,0, 1) for par in a])
@@ -1150,7 +1149,7 @@ class MF_Sampler():
         # Compute denominators
         self.integrator = cpnest.CPNest(Integrator(self.int_bounds, [], self.dim),
                                         verbose = 0,
-                                        nlive   = 200, #FIXME: too few for a reliable estimate?
+                                        nlive   = 200,
                                         maxmcmc = 1000,
                                         nensemble = 1,
                                         output = Path(self.output_folder, 'int_output'),
@@ -1308,7 +1307,6 @@ class MF_Sampler():
         prob = []
         for i, ai in enumerate(self.gridpoints):
             a = self.transform([ai])
-            #FIXME: scrivere log_norm in cython
             print('\rGrid evaluation: {0}/{1}'.format(i+1, n_points), end = '')
             logsum = np.sum([scalar_log_norm(par,0, 1) for par in a])
             prob.append([logsumexp([log_norm(a, component['mean'], component['cov']) + np.log(component['weight']) for component in sample.values()]) - logsum for sample in self.mixture_samples])
@@ -1398,8 +1396,6 @@ class MF_Sampler():
         prob = []
         for ai in self.gridpoints:
             a = self.transform([ai])
-            #FIXME: scrivere log_norm in cython
-            print('\rGrid evaluation: {0}/{1} (checkpoint)'.format(i+1, n_points), end = '')
             logsum = np.sum([log_norm(par,0, 1) for par in a])
             prob.append([logsumexp([log_norm(a, component['mean'], component['cov']) + np.log(component['weight']) for component in sample.values()]) - logsum for sample in self.mixture_samples[-self.ncheck:]])
         prob = np.array(prob).reshape([n_points for _ in range(self.dim)] + [self.n_draws])
@@ -1474,7 +1470,7 @@ class ScoreComputer:
         self.rdstate = rdstate
         self.integrator = cpnest.CPNest(Integrator(self.bounds, [], self.dim),
                                         verbose = 0,
-                                        nlive   = 200, #FIXME: too few for a reliable estimate?
+                                        nlive   = 200,
                                         maxmcmc = 1000,
                                         nensemble = 1,
                                         output = Path(self.output_folder, 'int_output'),
