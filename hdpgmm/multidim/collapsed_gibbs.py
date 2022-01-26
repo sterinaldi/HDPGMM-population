@@ -1154,12 +1154,12 @@ class MF_Sampler():
                                         )
         self.integrator.run()
         state['logL_D']["new"] = self.integrator.logZ
-        state['samples']["new"] = np.fromiter(self.rdstate.choice(self.integrator.nested_samples), dtype = np.float64)[:-2]
+        state['samples']["new"] = np.fromiter(self.rdstate.choice(self.integrator.posterior_samples), dtype = np.float64)[:-2]
         for cid in state['cluster_ids_']:
             self.integrator.user.events = [self.posterior_draws[i] for i in state['ev_in_cl'][cid]]
             self.integrator.run()
             state['logL_D'][cid] = self.integrator.logZ
-            state['samples'][cid] = np.fromiter(self.rdstate.choice(self.integrator.nested_samples), dtype = np.float64)[:-2]
+            state['samples'][cid] = np.fromiter(self.rdstate.choice(self.integrator.posterior_samples), dtype = np.float64)[:-2]
         
         self.state = state
         return
@@ -1232,7 +1232,7 @@ class MF_Sampler():
         self.integrator.user.events = [self.posterior_draws[i] for i in self.state['ev_in_cl'][cid]]
         self.integrator.run()
         self.state['logL_D'][cid] = self.integrator.logZ
-        self.state['samples'][cid] = np.fromiter(self.rdstate.choice(self.integrator.nested_samples), dtype = np.float64)[:-2]
+        self.state['samples'][cid] = np.fromiter(self.rdstate.choice(self.integrator.posterior_samples), dtype = np.float64)[:-2]
 
     def add_to_cluster(self, data_id, cid):
         self.state['ev_in_cl'][cid].append(data_id)
@@ -1547,7 +1547,7 @@ class ScoreComputer:
         self.integrator.user.events = events
         self.integrator.run()
         logL_N = self.integrator.logZ #numerator
-        sample = np.fromiter(self.rdstate.choice(self.integrator.nested_samples), dtype = np.float64)[:-2]
+        sample = np.fromiter(self.rdstate.choice(self.integrator.posterior_samples), dtype = np.float64)[:-2]
         return logL_N - logL_D, logL_N, sample
 
 def MH_single_event(p, upper_bound, lower_bound, len, rdstate, burnin = 1000, thinning = 100):
