@@ -66,3 +66,27 @@ cdef double _integrand(double[:] mean, double[:,:] covariance, list events, unsi
 
 def integrand(double[:] mean, double[:,:] covariance, list events, unsigned int dim):
     return _integrand(mean, covariance, events, dim)
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.nonecheck(False)
+@cython.cdivision(True)
+cdef double _triple_product(double[:] x, double[:,:] inv_cov) nogil:
+    cdef unsigned int i,j
+    cdef unsigned int n = x.shape[0]
+    cdef double res     = 0.0
+    for i in range(n):
+        for j in range(n):
+            res += inv_cov[i,j]*x[i]*x[j]
+    return res
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.nonecheck(False)
+@cython.cdivision(True)
+cdef double _log_mvn(double[:] x, double[:] mu, double[:,:] cov):
+    cdef double[:,:] inv_cov = np.linalg.inv(cov)
+    cdef double exponent     = -0.5*_triple_product(x - mu, inv_cov)
+    cdef double lognorm      = mu.shape[0]*LOGSQRT2-np.linalg.slogdet(inv_cov)[1]
+    return -lognorm+exponent
+             
