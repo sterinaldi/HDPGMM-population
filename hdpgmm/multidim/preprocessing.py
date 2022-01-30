@@ -115,7 +115,7 @@ def load_data(path, seed = 0, par = ['m1', 'm2'], n_samples = -1, h = 0.674, om 
 def unpack_gw_posterior(event, par, cosmology, rdstate, n_samples = -1):
     '''
     Reads data from .h5/.hdf5 GW posterior files.
-    Implemented 'm1', 'm2', 'mc', 'z', 'chi_eff'.
+    Implemented 'm1', 'm2', 'mc', 'z', 'chi_eff', 'luminosity_distance', 'ra', 'dec'.
     
     Arguments:
         :str event:       file to read
@@ -143,6 +143,12 @@ def unpack_gw_posterior(event, par, cosmology, rdstate, n_samples = -1):
                 samples.append(data['redshift'])
             if 'chi_eff' in par:
                 samples.append(data['chi_eff'])
+            if 'ra' in par:
+                samples.append(data['ra'])
+            if 'dec' in par:
+                samples.append(data['dec'])
+            if 'luminosity_distance' in par:
+                samples.append(data['luminosity_distance'])
             
             samples = np.array(samples).T
             
@@ -153,14 +159,19 @@ def unpack_gw_posterior(event, par, cosmology, rdstate, n_samples = -1):
                 return samples
         
         except:
-            
-            data = f['Overall_posterior']
+            try:
+                data = f['Overall_posterior']
+            except:
+                print(event)
+            ra        = data['right_ascension']
+            dec       = data['declination']
             LD        = data['luminosity_distance_Mpc']
-            z         = np.array([z_at_value(ap_cosmology.luminosity_distance, l*u.Mpc) for l in LD])
-            m1_detect = data['m1_detector_frame_Msun']
-            m2_detect = data['m2_detector_frame_Msun']
-            m1        = m1_detect/(1+z)
-            m2        = m2_detect/(1+z)
+            if np.array([p in ['z', 'm1', 'm2', 'mc', 'chi_eff'] for p in par]).any():
+                z         = np.array([z_at_value(ap_cosmology.luminosity_distance, l*u.Mpc) for l in LD])
+                m1_detect = data['m1_detector_frame_Msun']
+                m2_detect = data['m2_detector_frame_Msun']
+                m1        = m1_detect/(1+z)
+                m2        = m2_detect/(1+z)
             
             if 'z' in par:
                 samples.append(z)
@@ -177,6 +188,12 @@ def unpack_gw_posterior(event, par, cosmology, rdstate, n_samples = -1):
                 cos2 = data['costilt2']
                 q    = m2/m1
                 samples.append((s1*cos1 + q*s2*cos2)/(1+q))
+            if 'ra' in par:
+                samples.append(ra)
+            if 'dec' in par:
+                samples.append(dec)
+            if 'luminosity_distance' in par:
+                samples.append(LD)
             
             samples = np.array(samples).T
             
@@ -185,3 +202,4 @@ def unpack_gw_posterior(event, par, cosmology, rdstate, n_samples = -1):
                 return samples[rdstate.choice(np.arange(len(samples)), size = s, replace = False)]
             else:
                 return samples
+        
