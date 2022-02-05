@@ -72,7 +72,8 @@ def natural_keys(text):
     '''
     return [ atoi(c) for c in re.split(r'(\d+)', text) ]
 
-def my_student_t(df, t, mu, sigma, dim, s2max = np.inf):
+@jit
+def my_student_t(df, t, mu, sigma, dim, s2max):
     """
     http://gregorygundersen.com/blog/2020/01/20/multivariate-t/
     """
@@ -91,7 +92,7 @@ def my_student_t(df, t, mu, sigma, dim, s2max = np.inf):
     D = 0.5 * logdet
     E = -x * np.log1p((1./df) * maha)
 
-    return float(A - B - C - D + E)
+    return (A - B - C - D + E)[0]
 
 class CGSampler:
     '''
