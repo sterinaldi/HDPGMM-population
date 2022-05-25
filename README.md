@@ -1,4 +1,8 @@
 # HDPGMM-population
+
+## IMPORTANT
+This code is not actively mantained anymore. We suggest to use the [FIGARO](https://github.com/sterinaldi/figaro) code instead
+
 Source code for the inference of black hole mass function using (H)DPGMM.
 This code implements a Gibbs sampler to explore a hierarchy of DPGMMs.
 If you use this code, please cite the paper https://arxiv.org/pdf/2109.05960.pdf.
